@@ -546,38 +546,3 @@ $arcCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'machines' })
 
 Write-Host "For month $($queryMonth): Queried data from $($QueryResultList.Count) Machines. VM count: $vmCount. Arc machine count: $arcCount." -ForegroundColor Blue
 Write-Host "Script started at: $scriptStartTime. Script ended at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Green
-
-<#
-## KQL
-"resources
-| where type == "microsoft.hybridcompute/machines"
-| extend Status = tostring(properties.status), LastStatusChange = todatetime(properties.lastStatusChange)
-| where LastStatusChange between (datetime(2025-09-01) .. datetime(2025-09-30))
-| extend DownHours = iff(Status != "Connected", round(datetime_diff('minute', now(), LastStatusChange) / 60.0, 2), 0.0)
-| project name, Status, LastStatusChange, DownHours
-| order by DownHours desc"
-
-
-## Log Analytics Logs:
-"let startTime = datetime(2025-09-01);
-let endTime = datetime(2025-10-06 23:59:59);
-Heartbeat
-| where ResourceType has "machines"
-| where TimeGenerated between (startTime .. endTime)
-| summarize 
-    FirstSeen = min(TimeGenerated),
-    LastSeen = max(TimeGenerated),
-    TotalSamples = count()
-  by _ResourceId
-| join kind=inner (
-    Heartbeat
-| where ResourceType has "machines"
-    | where TimeGenerated between (startTime .. endTime)
-    | summarize UpSamples = count() by _ResourceId
-) on _ResourceId
-| extend DownSamples = TotalSamples - UpSamples
-| extend UpRate = round((UpSamples * 100.0) / TotalSamples, 2), DowntimeHours = round((DownSamples * 1.0) / 60.0, 2) // 1-Minuten-Granularität
-| extend DownRate = round(100.0 - UpRate, 2)
-| project _ResourceId, UpRate, DownRate, DowntimeHours, FirstSeen, LastSeen
-| order by DownRate desc"
-#>
