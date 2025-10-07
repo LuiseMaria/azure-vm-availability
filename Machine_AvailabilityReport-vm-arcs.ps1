@@ -438,7 +438,7 @@ function Measure-AvailabilityMetrics {
     )
 
     $totalHoursInMonth = if ($ResultRow.total_hours_in_month) { [double]$ResultRow.total_hours_in_month } else { 0.0 }
-
+    $availabilityRate = if ($ResultRow.availability_rate) { [math]::Round([double]$ResultRow.availability_rate, 2) } else { 0.0 }
     # Convert hours to minutes and ensure minimum values are not zero
     $totalMinutesInMonth = [math]::Max(1, [math]::Round($totalHoursInMonth * 60, 0))
     $downMinutes = [math]::Max(0, [math]::Round([double]$ResultRow.total_down_hours * 60, 0))
@@ -450,11 +450,11 @@ function Measure-AvailabilityMetrics {
         $adjustedAvailableMinutes = [math]::Max(0, $adjustedTotalMinutes - $adjustedDownMinutes)
         
         if ($adjustedTotalMinutes -gt 0) {
-            $availabilityRateWithSuppression = [math]::Round(100.0 * $adjustedAvailableMinutes / $adjustedTotalMinutes, 1)
+            $availabilityRateWithSuppression = [math]::Round(100.0 * $adjustedAvailableMinutes / $adjustedTotalMinutes, 2)
         }
     }
     else {
-        $availabilityRateWithSuppression = [math]::Round([double]$ResultRow.availability_rate, 1)
+        $availabilityRateWithSuppression = $availabilityRate
     }
 
     return @{
@@ -462,7 +462,7 @@ function Measure-AvailabilityMetrics {
         AvailabilityRate                = [double]$ResultRow.availability_rate
         AvailabilityRateWithSuppression = [double]$availabilityRateWithSuppression
         DownRate                        = [double]$ResultRow.down_rate
-        DownRateWithSuppression         = (100 - [double]$availabilityRateWithSuppression)
+        DownRateWithSuppression         = (100 - $availabilityRateWithSuppression)
         TotalHoursDown                  = [math]::Round($ResultRow.total_down_hours, 2)
         TotalHoursAvailable             = [math]::Round($ResultRow.total_available_hours, 2)
         UnobservedHours                 = [math]::Round($totalHoursInMonth - [math]::Round((([datetime]$ResultRow.LastHeartbeat) - ([datetime]$ResultRow.FirstHeartbeat)).TotalHours, 3), 0)
@@ -486,7 +486,7 @@ function Update-ResultList {
 
     # Check whether the machine is already in the results list
     $existingEntries = $QueryResultList | Where-Object {
-        $_.VMName -eq $MachineData.Name -and 
+        $_.MachineName -eq $MachineData.Name -and 
         $_.SubscriptionId -eq $MachineData.SubscriptionId -and 
         $_.ResourceGroup -eq $MachineData.ResourceGroup -and 
         $_.FirstHeartbeat -eq $MachineData.Start.ToString("u") -and 
@@ -540,7 +540,11 @@ $queryMonth = ([datetime]$QueryResultList.TimeRangeStart[0]).ToString("MMM")
 $dateString = Get-Date -Format "yyyyMMdd_HHmm"
 $QueryResultList | Sort-Object MachineName | Export-Csv -Path "Machine_Availability_${queryMonth}_$($dateString).csv" -Delimiter "," -Encoding UTF8
 
-Write-Host "For month $($queryMonth): Queried data from $($QueryResultList.Count) VMs." -ForegroundColor Blue
+# Count unique VMs and Arc machines in the result list (unique by MachineName + SubscriptionId)
+$vmCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'virtualMachines' }).Count
+$arcCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'machines' }).Count
+
+Write-Host "For month $($queryMonth): Queried data from $($QueryResultList.Count) Machines. VM count: $vmCount. Arc machine count: $arcCount." -ForegroundColor Blue
 Write-Host "Script started at: $scriptStartTime. Script ended at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Green
 
 <#
