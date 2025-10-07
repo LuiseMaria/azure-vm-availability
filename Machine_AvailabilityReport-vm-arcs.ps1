@@ -23,30 +23,30 @@
 
 .NOTES
     - The script exports two CSV files:
-        1. VM_Availability_<Month>_<Date>.csv: Contains availability data for VMs with valid subscription IDs.
-        2. VM_Availability_Faulty_Resources_<Month>_<Date>.csv: Contains data for VMs with subscription IDs not found in the current context.
+        1. Machine_Availability_<Month>_<Date>.csv: Contains availability data for VMs with valid subscription IDs.
+        2. Machine_Availability_Faulty_Resources_<Month>_<Date>.csv: Contains data for VMs with subscription IDs not found in the current context.
     - The script filters out VMs whose names start with "vba" or end with "-tmp".
     - The script calculates availability as the percentage of minutes the VM was available during the previous month.
 
 .EXAMPLE
     Examples:
     1) Run for a given month for all accessible subscriptions:
-        .\Create_VMAvailabilityReport_v3.ps1 -ReportMonth 3
+        .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 3
     
     2) Run for a specific set of subscriptions:
-        .\Create_VMAvailabilityReport_v3.ps1 -ReportMonth 3 -SubscriptionIdList '11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222'
+        .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 3 -SubscriptionIdList '11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222'
     
     3) Run for a specific subscription index range (useful for large tenants):
-        .\Create_VMAvailabilityReport_v3.ps1 -ReportMonth 3 -SubRangeStartEnd 20,310
+        .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 3 -SubRangeStartEnd 20,310
     
     4) Authenticate first (optional) and run against a single subscription:
         Connect-AzAccount -TenantId '<tenant-id>' -SubscriptionId '<subscription-id>'
-        .\Create_VMAvailabilityReport_v3.ps1 -ReportMonth 3 -SubscriptionIdList '<subscription-id>'
+        .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 3 -SubscriptionIdList '<subscription-id>'
     
     Notes:
     - The script requires the Az.Accounts and Az.OperationalInsights modules.
     - Output CSV files are written to the current working directory and are named like:
-        VM_Availability_<Mon>_<yyyyMMdd_HHmm>.csv
+        Machine_Availability_<Mon>_<yyyyMMdd_HHmm>.csv
 #>
 
 #Requires -Modules Az.Accounts, Az.OperationalInsights
@@ -524,7 +524,7 @@ function Update-ResultList {
                 $QueryResultList[$QueryResultList.IndexOf($entry)].LAW = Merge-Law -existingLAW $entry.LAW -newLAW $Workspace.Name
             }
             catch {
-                Write-Host "ERROR while merging LAW values for VM: $($MachineData.Name) in Subscription $($MachineData.SubscriptionId). $_" -ForegroundColor Red
+                Write-Host "ERROR while merging LAW values for Machine: $($MachineData.Name) in Subscription $($MachineData.SubscriptionId). $_" -ForegroundColor Red
             }
         }
     }
