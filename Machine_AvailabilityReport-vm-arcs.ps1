@@ -507,9 +507,9 @@ function Update-ResultList {
                 FirstHeartbeat                                  = $MachineData.Start.ToString("u")
                 LastHeartbeat                                   = $MachineData.End.ToString("u")
                 "down_rate (%)"                                 = $AvailabilityMetrics.DownRate
+                "Down Rate considering suppression (%)"         = $AvailabilityMetrics.DownRateWithSuppression
                 "availability_rate (%)"                         = $AvailabilityMetrics.AvailabilityRate
                 "Availability Rate considering suppression (%)" = $AvailabilityMetrics.AvailabilityRateWithSuppression
-                "Down Rate considering suppression (%)"         = $AvailabilityMetrics.DownRateWithSuppression
                 "Suppression Duration (h)"                      = [math]::Round($SuppressionDuration / 60, 2)
                 "Down (h)"                                      = $AvailabilityMetrics.TotalHoursDown
                 "Available (h)"                                 = $AvailabilityMetrics.TotalHoursAvailable
