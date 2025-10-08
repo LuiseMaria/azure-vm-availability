@@ -115,7 +115,6 @@ function Write-Log {
         { $_ -in ('Debug', 'Error') } {
             ## print to console and log file
             if($Severity -eq 'Error') {
-                $filePath = "$($LogFilePath)$Logfile_$($script:LogSessionId).txt"
                 $Color = "Red"
             }
             Write-Host "$Message" -ForegroundColor $Color
