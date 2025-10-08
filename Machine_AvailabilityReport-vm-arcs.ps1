@@ -432,8 +432,8 @@ function Merge-MachineWithStatus {
         $ResultRow
     )
 
-    $machineStart = (Get-Date ([datetime]$ResultRow.FirstHeartbeat) -Second 0).ToUniversalTime()
-    $machineEnd = (Get-Date ([datetime]$ResultRow.LastHeartbeat) -Second 0).ToUniversalTime()
+    $machineStart = (Get-Date ([datetime]$ResultRow.FirstHeartbeat)).ToUniversalTime()
+    $machineEnd = (Get-Date ([datetime]$ResultRow.LastHeartbeat)).ToUniversalTime()
     $machineName = $ResultRow.Resource
     $resourceType = $ResultRow.ResourceType
 
@@ -466,13 +466,15 @@ function Get-SuppressionDuration {
 
     try {
         $duration = 0
+        $StartTimeResetedSeconds = (Get-Date ([datetime]($MachineData.Start)) -Second 0).ToUniversalTime()
+        $EndTimeResetedSeconds = (Get-Date ([datetime]($MachineData.End)) -Second 0).ToUniversalTime()
         foreach ($rule in $script:SuppressionRulesInTenant) {  
             $rule | Where-Object { $MachineData.ResourceId -in $_.Scopes } | ForEach-Object {
                 $ruleStart = if ($_.effectiveFrom) { ($_.effectiveFrom).ToUniversalTime() } else { [datetime]::MinValue }
                 $ruleEnd = if ($_.effectiveUntil) { ($_.effectiveUntil).ToUniversalTime() } else { [datetime]::MaxValue }
 
-                $overlapStart = if ($ruleStart -gt $MachineData.Start) { $ruleStart } else { $MachineData.Start }
-                $overlapEnd = if ($ruleEnd -lt $MachineData.End) { $ruleEnd }   else { $MachineData.End }
+                $overlapStart = if ($ruleStart -gt $StartTimeResetedSeconds) { $ruleStart } else { $StartTimeResetedSeconds }
+                $overlapEnd = if ($ruleEnd -lt $EndTimeResetedSeconds) { $ruleEnd }   else { $EndTimeResetedSeconds }
 
                 if ($overlapEnd -gt $overlapStart) {
                     $duration += [math]::Round(($overlapEnd - $overlapStart).TotalMinutes, 0)
@@ -545,11 +547,15 @@ function Update-ResultList {
 
     # Check whether the machine is already in the results list
     $existingEntries = $QueryResultList | Where-Object {
+        $StartTimeResetedSeconds = (Get-Date ([datetime]($MachineData.Start)) -Second 0).ToUniversalTime().ToString("u")
+        $EndTimeResetedSeconds = (Get-Date ([datetime]($MachineData.End)) -Second 0).ToUniversalTime().ToString("u")
+        $FirstHeartbeatReseted = (Get-Date ([datetime]($_.FirstHeartbeat)) -Second 0).ToUniversalTime().ToString("u")
+        $LastHeartbeatReseted = (Get-Date ([datetime]($_.LastHeartbeat)) -Second 0).ToUniversalTime().ToString("u")
         $_.MachineName -eq $MachineData.Name -and 
         $_.SubscriptionId -eq $MachineData.SubscriptionId -and 
         $_.ResourceGroup -eq $MachineData.ResourceGroup -and 
-        $_.FirstHeartbeat -eq $MachineData.Start.ToString("u") -and 
-        $_.LastHeartbeat -eq $MachineData.End.ToString("u") -and 
+        $FirstHeartbeatReseted -eq $StartTimeResetedSeconds -and 
+        $LastHeartbeatReseted -eq $EndTimeResetedSeconds -and 
         ([math]::Round($SuppressionDuration / 60, 2) -eq [double]($_.'Suppression Duration (h)'))
     }
 
