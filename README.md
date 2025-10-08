@@ -1,6 +1,10 @@
 ﻿# PowerShell Script calculating VM and Arc Machine Availability
 ## ➡️ using **Azure Monitor Logs** for Heartbeats, **Azure Resource Graph Explorer** for Suppression Alert Rules, VM/Arc Machine Status and last but not least **Azure REST API**
 
+
+This PowerShell script calculates the availability of Azure Virtual Machines (VMs) and Azure Arc-enabled servers by analyzing heartbeat data from Azure Monitor Logs. It also checks for any suppression alert rules that might affect the availability calculations.
+
+
 ### Example, how to run Script for getting Data from all LAWs in tenant e.g. from 01. Sep - 30. Sep 2025:
 
 ````powershell
@@ -8,6 +12,7 @@
 ````
 *Depending on how many Log Analytics Workspaces (LAWs) exist in tenant, the script may take some time to run because it retrieves data from all LAWs.
 For more than 400 LAWs and > 1000 Machines, execution typically takes about 10–30 minutes.*
+
 
 ### KQL for VM/Arcs Availability
 
