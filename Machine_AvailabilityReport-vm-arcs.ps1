@@ -79,7 +79,6 @@ param (
     [int[]]$SubRangeStartEnd, # Provide exactly two integers to define a range (e.g. 20,310)
     $ExportFilePath = "./Machine_Availability_", # Optional: Directory path to save the output CSV files. Default: current directory.
     [ValidateSet('All', 'VM', 'Arc')]
-    [Parameter(Mandatory = $true)]
     [string]$ResourceType = 'All'
 )
 
