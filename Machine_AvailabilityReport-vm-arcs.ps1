@@ -366,7 +366,7 @@ function Invoke-DataPerLAW {
         [string]$ArcMachineHeartbeatsKQL
     )
 
-    Write-Log "[$($global:CurrentWorkspaceIndex)/$($script:LogAnalyticsWorkspacesInTenant.count)] Querying Log Analytics Workspace: $($Workspace.name)" -Severity Debug
+    Write-Log "[$($global:CurrentWorkspaceIndex)/$($script:LogAnalyticsWorkspacesInTenant.count)] Querying Log Analytics Workspace: $($Workspace.name)" -Severity Debug -Color Black
     $global:CurrentWorkspaceIndex++
 
     try {
