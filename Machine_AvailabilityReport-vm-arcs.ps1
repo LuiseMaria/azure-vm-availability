@@ -93,25 +93,38 @@ function Write-Log {
         $LogFilePath = "$ExportFilePath",
         [Parameter(Mandatory = $true, Position = 0)]
         $Message,
-        [ValidateSet('Info', 'Debug', 'Error')]
+        [ValidateSet('Info', 'Console', 'Debug', 'Error')]
         [string]$Severity = "Info",
         [System.ConsoleColor]$Color = [System.ConsoleColor]::Blue
     )
-    if ($Severity -eq "Info" -or $Severity -eq "Error") {
-        if ($Severity -eq "Error") {
-            Write-Host "$Message" -ForegroundColor Red
-        } else {
-            Write-Host "$Message" -ForegroundColor $Color
+    $filePath = "$($LogFilePath)Logfile_$($script:LogSessionId).txt"
+    switch ($Severity) {
+        'Info' {
+            ## print only to Log file
+            $logMessage = "$($Message)`n"
+            $logMessage | Out-File -FilePath $filePath -Append -Encoding UTF8
+            continue
         }
-        $logMessage = "$($Message)`n"
-        $logMessage | Out-File -FilePath "$($LogFilePath)$($Severity)Logfile_$($script:LogSessionId).txt" -Append
-    }
-    else {
-        Write-Host "$Message" -ForegroundColor $Color
+        'Console' {
+            ## print only to console
+            Write-Host "$Message" -ForegroundColor $Color
+            continue
+        }
+        {$_ -in ('Debug','Error')} {
+            ## print to console and log file
+            if($Severity -eq 'Error') {
+                $filePath = "$($LogFilePath)$($Severity)Logfile_$($script:LogSessionId).txt"
+                $Color = "Red"
+            }
+            Write-Host "$Message" -ForegroundColor $Color
+            $logMessage = "$($Message)`n"
+            $logMessage | Out-File -FilePath $filePath -Append -Encoding UTF8
+            continue
+        }
     }
 }
 
-Write-Log "$scriptStartTime - Starting script for month '$ReportMonth'." -severity Info
+Write-Log "$scriptStartTime - Starting script for month '$ReportMonth'." -Severity Debug -Color Green
 
 
 function Get-EnabledSubscriptions {
@@ -125,7 +138,7 @@ function Get-EnabledSubscriptions {
         $subs = $subs | Sort-Object
         if ($SubRangeStartEnd.Count -eq 2) {
             $subs = $subs[$($SubRangeStartEnd[0])..$($SubRangeStartEnd[-1])]
-            Write-Log "Generating report for subscriptions in range index $($SubRangeStartEnd[0]) to $($SubRangeStartEnd[-1])" -Severity Info
+            Write-Log "Generating report for subscriptions in range index $($SubRangeStartEnd[0]) to $($SubRangeStartEnd[-1])" -Severity Debug
         }
         return $($subs)
     }
@@ -284,7 +297,7 @@ $script:ArcMachinesStatusById = New-Object 'System.Collections.Generic.Dictionar
 
 
 if(-not $SubscriptionIdList) {
-    Write-Log "Starting to query Subscriptions, LAWs, Suppression Rules, VMs and Arc Machines in TenantScope..." -Severity Info
+    Write-Log "Starting to query Subscriptions, LAWs, Suppression Rules, VMs and Arc Machines in TenantScope..." -Severity Debug
     $subscriptions = (Get-EnabledSubscriptions)
     Get-LogAnalyticsWorkspaces
     Get-AlertSuppressionRulesInTenant
@@ -292,14 +305,14 @@ if(-not $SubscriptionIdList) {
     Get-ArcMachinesInTenant
 }
 else {
-    Write-Log "Starting to query LAWs, Suppression Rules and VMs in for Subscription ID(s): '$($SubscriptionIdList)...'" -severity Info
+    Write-Log "Starting to query LAWs, Suppression Rules and VMs in for Subscription ID(s): '$($SubscriptionIdList)...'" -Severity Debug
     $subscriptions = $SubscriptionIdList
     Get-AlertSuppressionRulesInTenant -SubscriptionIds $SubscriptionIdList
     Get-LogAnalyticsWorkspaces -SubscriptionIds $SubscriptionIdList
     Get-VMsInTenant -SubscriptionIds $SubscriptionIdList
     Get-ArcMachinesInTenant -SubscriptionIds $SubscriptionIdList
 }
-Write-Log "Found $($LogAnalyticsWorkspacesInTenant.Count) LAWs, $($VmsInTenant.Count) VMs, $($ArcMachinesInTenant.Count) Arc Machines and $($SuppressionRulesInTenant.Count) Suppression Rules in Tenant ($($subscriptions.Count) Subscriptions)." -Color Yellow
+Write-Log "Found $($LogAnalyticsWorkspacesInTenant.Count) LAWs, $($VmsInTenant.Count) VMs, $($ArcMachinesInTenant.Count) Arc Machines and $($SuppressionRulesInTenant.Count) Suppression Rules in Tenant ($($subscriptions.Count) Subscriptions)." -Color Yellow -Severity Debug
 
 
 # KQL - retrieves the uptime of VMs for the previous month, excluding VMs with names starting with "vba" or ending with "-tmp".
@@ -366,7 +379,7 @@ function Invoke-DataPerLAW {
         [string]$ArcMachineHeartbeatsKQL
     )
 
-    Write-Log "[$($global:CurrentWorkspaceIndex)/$($script:LogAnalyticsWorkspacesInTenant.count)] Querying Log Analytics Workspace: $($Workspace.name)" -Severity Debug -Color Black
+    Write-Log "[$($global:CurrentWorkspaceIndex)/$($script:LogAnalyticsWorkspacesInTenant.count)] Querying Log Analytics Workspace: $($Workspace.name)" -Severity Console -Color Black
     $global:CurrentWorkspaceIndex++
 
     try {
@@ -375,7 +388,7 @@ function Invoke-DataPerLAW {
 
             $queryResponse = Invoke-AzOperationalInsightsQuery -WorkspaceId $Workspace.WorkspaceId -Query $($_)
             if ($queryResponse -and $queryResponse.Results.Count -ge 1) {
-                Write-Log "Results found for workspace: $($Workspace.name)"
+                Write-Log "Results found for workspace: $($Workspace.name)" -Severity Info
                 Get-QueryResults -Results $queryResponse.Results -Workspace $Workspace
             }
         }
@@ -590,7 +603,7 @@ $vmCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'virtualMachin
 $arcCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'machines' }).Count
 
 
-Write-Log "For month $($queryMonth): Queried data from $($QueryResultList.Count) Machines. VM count: $vmCount. Arc machine count: $arcCount."
+Write-Log "For month $($queryMonth): Queried data from $($QueryResultList.Count) Machines. VM count: $vmCount. Arc machine count: $arcCount." -Severity Debug
 
 ### Identify subscriptions that were in the input list but not found in the results
 $foundSubscriptionIds = $QueryResultList | Select-Object -ExpandProperty SubscriptionId -Unique
@@ -603,16 +616,16 @@ foreach ($subId in $subscriptions) {
 ### Identify Machines that had no data in LAW
 $noDataInLAW = $QueryResultList | Where-Object { $subscriptions -notcontains $($_.SubscriptionId) }
 
-Write-Log "Subscriptions not found in results: $($unresolvedSubscriptions.Count)" -Color Yellow -Debug
+Write-Log "Subscriptions not found in results: $($unresolvedSubscriptions.Count)" -Severity Debug -Color Magenta
 if ($unresolvedSubscriptions.Count -gt 0) {
-    Write-Log "Unresolved subscriptions: $($unresolvedSubscriptions -join ', ')" -Info
-    $($unresolvedSubscriptions) | fl
+    Write-Log "Unresolved subscriptions: $($unresolvedSubscriptions -join ', ')" -Severity Info
+    $($unresolvedSubscriptions) | Format-List
 }
 if ($noDataInLAW.Count -gt 0) {
-    Write-Log "Machines with no data in LAW: $($noDataInLAW.Count)" -Info
-    Write-Log "Unresolved Machines: $($noDataInLAW.MachineName -join ', ')" -Info
-    $noDataInLAW | fl -Property SubscriptionId, ResourceGroup, MachineName, ResourceType
+    Write-Log "Machines with no data in LAW: $($noDataInLAW.Count)" -Severity Debug -Color Magenta
+    Write-Log "Unresolved Machines: $($noDataInLAW.MachineName -join ', ')" -Severity Info
+    $noDataInLAW | Format-List -Property SubscriptionId, ResourceGroup, MachineName, ResourceType
 }
 
 
-Write-Log "Script started at: $scriptStartTime. Script ended at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -Color Green
+Write-Log "Script started at: $scriptStartTime. Script ended at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -Color Green -Severity Debug

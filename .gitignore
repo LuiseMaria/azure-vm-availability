@@ -1,3 +1,8 @@
+# add Output to ignore list
+Machine_Availability*
+# for matches in any subdirectory, use:
+# **/Machine_Availability*
+
 # Prerequisites
 *.d
 
