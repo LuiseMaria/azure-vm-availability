@@ -77,7 +77,10 @@ param (
     [string[]]$SubscriptionIdList, # Optional: Specify n Subscription IDs to limit the report to those subscriptions only. If not provided, all accessible subscriptions in Tenant will be included.
     [ValidateCount(2, 2)]
     [int[]]$SubRangeStartEnd, # Provide exactly two integers to define a range (e.g. 20,310)
-    $ExportFilePath = "./Machine_Availability_" # Optional: Directory path to save the output CSV files. Default: current directory.
+    $ExportFilePath = "./Machine_Availability_", # Optional: Directory path to save the output CSV files. Default: current directory.
+    [ValidateSet('All', 'VM', 'Arc')]
+    [Parameter(Mandatory = $true)]
+    [string]$ResourceType = 'All'
 )
 
 # $tenantId = "xxxxxx-xxxx-xxxxx-xxxx-xxxxxxxxx"
@@ -110,10 +113,10 @@ function Write-Log {
             Write-Host "$Message" -ForegroundColor $Color
             continue
         }
-        {$_ -in ('Debug','Error')} {
+        { $_ -in ('Debug', 'Error') } {
             ## print to console and log file
             if($Severity -eq 'Error') {
-                $filePath = "$($LogFilePath)$($Severity)Logfile_$($script:LogSessionId).txt"
+                $filePath = "$($LogFilePath)$Logfile_$($script:LogSessionId).txt"
                 $Color = "Red"
             }
             Write-Host "$Message" -ForegroundColor $Color
@@ -297,26 +300,27 @@ $script:ArcMachinesStatusById = New-Object 'System.Collections.Generic.Dictionar
 
 
 if(-not $SubscriptionIdList) {
-    Write-Log "Starting to query Subscriptions, LAWs, Suppression Rules, VMs and Arc Machines in TenantScope..." -Severity Debug
+    Write-Log "Starting to query Subscriptions, LAWs, Suppression Rules, and optional VMs and/or Arc Machines in TenantScope..." -Severity Debug
     $subscriptions = (Get-EnabledSubscriptions)
     Get-LogAnalyticsWorkspaces
     Get-AlertSuppressionRulesInTenant
-    Get-VMsInTenant
-    Get-ArcMachinesInTenant
+    if ($ResourceType -eq 'VM' -or $ResourceType -eq 'All') { Get-VMsInTenant }
+    if ($ResourceType -eq 'Arc' -or $ResourceType -eq 'All') { Get-ArcMachinesInTenant }
 }
 else {
     Write-Log "Starting to query LAWs, Suppression Rules and VMs in for Subscription ID(s): '$($SubscriptionIdList)...'" -Severity Debug
     $subscriptions = $SubscriptionIdList
     Get-AlertSuppressionRulesInTenant -SubscriptionIds $SubscriptionIdList
     Get-LogAnalyticsWorkspaces -SubscriptionIds $SubscriptionIdList
-    Get-VMsInTenant -SubscriptionIds $SubscriptionIdList
-    Get-ArcMachinesInTenant -SubscriptionIds $SubscriptionIdList
+    if ($ResourceType -eq 'VM' -or $ResourceType -eq 'All') { Get-VMsInTenant -SubscriptionIds $SubscriptionIdList }
+    if ($ResourceType -eq 'Arc' -or $ResourceType -eq 'All') { Get-ArcMachinesInTenant -SubscriptionIds $SubscriptionIdList }
 }
-Write-Log "Found $($LogAnalyticsWorkspacesInTenant.Count) LAWs, $($VmsInTenant.Count) VMs, $($ArcMachinesInTenant.Count) Arc Machines and $($SuppressionRulesInTenant.Count) Suppression Rules in Tenant ($($subscriptions.Count) Subscriptions)." -Color Yellow -Severity Debug
+Write-Log "For ResourceType '$($ResourceType)' found $($LogAnalyticsWorkspacesInTenant.Count) LAWs, $($VmsInTenant.Count) VMs, $($ArcMachinesInTenant.Count) Arc Machines and $($SuppressionRulesInTenant.Count) Suppression Rules in Tenant ($($subscriptions.Count) Subscriptions)." -Color Yellow -Severity Debug
 
 
 # KQL - retrieves the uptime of VMs for the previous month, excluding VMs with names starting with "vba" or ending with "-tmp".
-$VMHeartbeatsKQL = @"
+if($ResourceType -eq 'VM' -or $ResourceType -eq 'All') {
+    $VMHeartbeatsKQL = @"
 let timeRangeEnd = endofmonth(datetime($($UtcTimeRangeStartDate)));
 let timeRangeStart = startofmonth(timeRangeEnd);
 let FilteredHeartbeat = Heartbeat
@@ -342,8 +346,11 @@ FilteredHeartbeat
 | project Resource, ResourceType, RG, _ResourceId, SubscriptionId, timeRangeStart, timeRangeEnd, FirstHeartbeat=start_time, LastHeartbeat=vm_end,
 down_rate, availability_rate, total_available_hours, total_down_hours = round((total_minutes - capped_minutes) / 60.0, 3), total_hours_in_month = round(datetime_diff("minute", timeRangeEnd, timeRangeStart) / 60.0, 1)
 "@
+}
 
-$ArcMachineHeartbeatsKQL = @"
+# KQL - retrieves the uptime of Arc Machines for the previous month.
+if($ResourceType -eq 'Arc' -or $ResourceType -eq 'All') {
+    $ArcMachineHeartbeatsKQL = @"
 let timeRangeEnd = (endofmonth(datetime($($UtcTimeRangeStartDate))));
 let timeRangeStart = startofmonth(timeRangeEnd);
 let FilteredHeartbeat = Heartbeat
@@ -367,30 +374,25 @@ FilteredHeartbeat
 | project Resource, ResourceType, RG, _ResourceId, SubscriptionId, timeRangeStart, timeRangeEnd, FirstHeartbeat=start_time, LastHeartbeat=machine_end,
 down_rate, availability_rate, total_available_hours, total_down_hours = round((total_minutes - capped_minutes) / 60.0, 3), total_hours_in_month = round(datetime_diff("minute", timeRangeEnd, timeRangeStart) / 60.0, 1)
 "@
+}
 
 function Invoke-DataPerLAW {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
         $Workspace,
-        [Parameter(Mandatory = $true)]
-        [string]$VMHeartbeatsKQL,
-        [Parameter(Mandatory = $true)]
-        [string]$ArcMachineHeartbeatsKQL
+        [string]$MachineHeartbeatsKQL
     )
 
     Write-Log "[$($global:CurrentWorkspaceIndex)/$($script:LogAnalyticsWorkspacesInTenant.count)] Querying Log Analytics Workspace: $($Workspace.name)" -Severity Console -Color Black
     $global:CurrentWorkspaceIndex++
 
     try {
-        # run both kql (Arc Machine Heartbeats and VM Heartbeats) for each LAW
-        $ArcMachineHeartbeatsKQL, $VMHeartbeatsKQL | ForEach-Object {
-
-            $queryResponse = Invoke-AzOperationalInsightsQuery -WorkspaceId $Workspace.WorkspaceId -Query $($_)
-            if ($queryResponse -and $queryResponse.Results.Count -ge 1) {
-                Write-Log "Results found for workspace: $($Workspace.name)" -Severity Info
-                Get-QueryResults -Results $queryResponse.Results -Workspace $Workspace
-            }
+        # run kql (Arc Machine Heartbeats/VM Heartbeats) for each LAW
+        $queryResponse = Invoke-AzOperationalInsightsQuery -WorkspaceId $Workspace.WorkspaceId -Query $MachineHeartbeatsKQL -ErrorAction Stop
+        if ($queryResponse -and $queryResponse.Results.Count -ge 1) {
+            Write-Log "Results found for workspace: $($Workspace.name)" -Severity Info
+            Get-QueryResults -Results $queryResponse.Results -Workspace $Workspace
         }
     }
     catch {
@@ -546,24 +548,22 @@ function Update-ResultList {
     )
 
     # Check whether the machine is already in the results list
+    $StartTimeResetedSec = (Get-Date ([datetime]($MachineData.Start)) -Second 0).ToUniversalTime().ToString("u")
+    $EndTimeResetedSec = (Get-Date ([datetime]($MachineData.End)) -Second 0).ToUniversalTime().ToString("u")
     $existingEntries = $QueryResultList | Where-Object {
-        $StartTimeResetedSeconds = (Get-Date ([datetime]($MachineData.Start)) -Second 0).ToUniversalTime().ToString("u")
-        $EndTimeResetedSeconds = (Get-Date ([datetime]($MachineData.End)) -Second 0).ToUniversalTime().ToString("u")
-        $FirstHeartbeatReseted = (Get-Date ([datetime]($_.FirstHeartbeat)) -Second 0).ToUniversalTime().ToString("u")
-        $LastHeartbeatReseted = (Get-Date ([datetime]($_.LastHeartbeat)) -Second 0).ToUniversalTime().ToString("u")
-        $_.MachineName -eq $MachineData.Name -and 
-        $_.SubscriptionId -eq $MachineData.SubscriptionId -and 
-        $_.ResourceGroup -eq $MachineData.ResourceGroup -and 
-        $FirstHeartbeatReseted -eq $StartTimeResetedSeconds -and 
-        $LastHeartbeatReseted -eq $EndTimeResetedSeconds -and 
-        ([math]::Round($SuppressionDuration / 60, 2) -eq [double]($_.'Suppression Duration (h)'))
+        (($_.ResourceId -eq $MachineData.ResourceId) -and
+        ((Get-Date ([datetime]$_.FirstHeartbeat) -Second 0).ToUniversalTime().ToString("u") -eq $StartTimeResetedSec) -and
+        ((Get-Date ([datetime]$_.LastHeartbeat) -Second 0).ToUniversalTime().ToString("u") -eq $EndTimeResetedSec) -and 
+        ([math]::Round($SuppressionDuration / 60, 2) -eq [double]($_.'Suppression Duration (h)')))
     }
+
 
     if ($existingEntries.Count -le 0) {
         $QueryResultList.Add([PSCustomObject]@{
                 TimeRangeStart                                  = ([datetime]$ResultRow.TimeRangeStart).ToUniversalTime().ToString("u")
                 TimeRangeEnd                                    = ([datetime]$ResultRow.TimeRangeEnd).ToUniversalTime().ToString("u")
                 SubscriptionId                                  = $MachineData.SubscriptionId
+                ResourceId                                      = $MachineData.ResourceId
                 LAW                                             = $Workspace.Name
                 ResourceGroup                                   = $MachineData.ResourceGroup
                 MachineName                                     = $MachineData.Name
@@ -599,7 +599,11 @@ $global:CurrentWorkspaceIndex = 1
 $QueryResultList = New-Object System.Collections.Generic.List[PSCustomObject]
 
 foreach ($workspace in $LogAnalyticsWorkspacesInTenant) {
-    Invoke-DataPerLAW -Workspace $workspace -VMHeartbeatsKQL $VMHeartbeatsKQL -ArcMachineHeartbeatsKQL $ArcMachineHeartbeatsKQL
+    @($VMHeartbeatsKQL, $ArcMachineHeartbeatsKQL) | ForEach-Object {
+        if($_) {
+            Invoke-DataPerLAW -Workspace $workspace -MachineHeartbeatsKQL $_
+        }
+    }
 }
 $queryMonth = ([datetime]$QueryResultList.TimeRangeStart[0]).ToString("MMM")
 $QueryResultList | Sort-Object ResourceType, MachineName | Export-Csv -Path "$($ExportFilePath)${queryMonth}_$($LogSessionId).csv" -Delimiter "," -Encoding UTF8
@@ -633,5 +637,5 @@ if ($noDataInLAW.Count -gt 0) {
     $noDataInLAW | Format-List -Property SubscriptionId, ResourceGroup, MachineName, ResourceType
 }
 
-
-Write-Log "Script started at: $scriptStartTime. Script ended at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -Color Green -Severity Debug
+$scriptRunTime = (Get-Date).Subtract([datetime]($scriptStartTime))
+Write-Log "Script started at: $scriptStartTime. Script ended at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'). Duration: $($scriptRunTime.Hours)h $($scriptRunTime.Minutes)m $($scriptRunTime.Seconds)s" -Color Green -Severity Debug
