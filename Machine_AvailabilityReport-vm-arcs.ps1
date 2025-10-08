@@ -1,48 +1,69 @@
 <#
 .SYNOPSIS
-    Generates a report on the availability of Azure Virtual Machines across all subscriptions and Log Analytics Workspaces.
+    Generates a VM and Arc Machine availability report across Azure subscriptions and Log Analytics workspaces.
 
 .DESCRIPTION
-    This script queries all Azure subscriptions accessible to the user, retrieves all Log Analytics Workspaces, and runs a Kusto query to calculate VM availability for the previous month. 
-    It collects VM heartbeat data, calculates uptime, and exports the results to CSV files. VMs with subscription IDs not found in the current context are exported to a separate CSV for further investigation.
+    Enumerates Azure subscriptions (or uses a provided list), discovers Log Analytics Workspaces, and runs Kusto queries
+    to compute per-Machine availability for a specified month. Availability is
+    calculated as the percentage of minutes a Machine reported heartbeats during the reporting period.
+    This PowerShell script calculates the availability of Azure Virtual Machines (VMs) and Azure Arc-enabled servers by analyzing heartbeat data from Azure Monitor Logs. It also checks for any suppression alert rules that might affect the availability calculations.
+    The script generates a CSV report with availability metrics, including adjustments for any suppression rules that were active during the reporting period.
+    VMs whose names start with "vba" or end with "-tmp" are excluded from the main report.
+    Current VM power state is retrieved via Azure REST (Get-VMState). If unavailable, that field may be blank.
+    Time ranges are handled in UTC.
 
-.PARAMETER None
-    The script does not take any parameters. It uses the current Azure context and requires the Az.Accounts and Az.OperationalInsights modules.
+.PARAMETER ReportMonth
+    [int] Optional. Month (1-12) to run the report for. If omitted, the script defaults to the previous calendar month
+    of the current year.
+
+.PARAMETER SubscriptionIdList
+    [string[]] Optional. Array of subscription IDs to restrict processing to. When not supplied, the script enumerates all
+    subscriptions available in the current Az context.
+
+.PARAMETER SubRangeStartEnd
+    [int[]] Optional. Two-element array or comma-separated pair (start,end). When supplied, the script processes only the
+    subset of subscriptions in the enumerated list from index start (inclusive) to end (inclusive). Useful for batching
+    work across large tenants. For Example, to process subscriptions 20 through end, use "-SubRangeStartEnd 20,-1".
+
+.OUTPUTS
+    Machine_Availability_<Mon>_<yyyyMMdd_HHmm>.csv
+        CSV containing availability metrics for VMs whose subscriptions were resolved. Typical columns:
+            subscriptionId, resourceId, vmName, resourceGroup, osType, region,
+            availabilityPercent, totalMinutes, availableMinutes, missingMinutes,
+            lastHeartbeat, currentPowerState (when available)
+
+    Machine_Availability_Faulty_Resources_<Mon>_<yyyyMMdd_HHmm>.csv
+        CSV listing VM records with subscription IDs not found in the current context or otherwise unresolved.
 
 .REQUIREMENTS
     - Az.Accounts PowerShell module
-    - Az.OperationalInsights PowerShell module
-    - Sufficient permissions to list subscriptions, Log Analytics Workspaces, and query Operational Insights data
-
-.FUNCTIONS
-    Get-LogAnalyticsWorkspaces
-        Retrieves all Log Analytics Workspaces for a given subscription and adds them to a global list.
-
-    Get-VMState
-        Retrieves the current power state of a specified VM using the Azure REST API.
+    - Az.OperationalInsights PowerShell module (or equivalent method to query Log Analytics)
+    - Permissions to list subscriptions, read Log Analytics workspaces, and query workspace data
+    - Network access to Azure Resource Manager and Log Analytics endpoints
 
 .NOTES
-    - The script exports two CSV files:
-        1. Machine_Availability_<Month>_<Date>.csv: Contains availability data for VMs with valid subscription IDs.
-        2. Machine_Availability_Faulty_Resources_<Month>_<Date>.csv: Contains data for VMs with subscription IDs not found in the current context.
-    - The script filters out VMs whose names start with "vba" or end with "-tmp".
-    - The script calculates availability as the percentage of minutes the VM was available during the previous month.
+    - Availability is computed at minute granularity for the reporting month.
+    -  Time ranges are handled in UTC
+    - VMs whose names start with "vba" or end with "-tmp" are excluded from the main report.
+    - Current VM power state is retrieved via Azure REST (Get-VMState). If unavailable set to "unknown/deleted".
+    - Time ranges are handled in UTC unless explicitly converted or adjusted in the script.
+    - Use SubRangeStartEnd to split processing for large numbers of subscriptions to mitigate throttling and long runtimes.
+    - Output CSV files are written to the current working directory with timestamped filenames.
 
 .EXAMPLE
-    Examples:
-    1) Run for a given month for all accessible subscriptions:
-        .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 3
-    
-    2) Run for a specific set of subscriptions:
-        .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 3 -SubscriptionIdList '11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222'
-    
-    3) Run for a specific subscription index range (useful for large tenants):
-        .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 3 -SubRangeStartEnd 20,310
-    
-    4) Authenticate first (optional) and run against a single subscription:
-        Connect-AzAccount -TenantId '<tenant-id>' -SubscriptionId '<subscription-id>'
-        .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 3 -SubscriptionIdList '<subscription-id>'
-    
+    # Default: previous month across all accessible subscriptions
+    .\Machine_AvailabilityReport-vm-arcs.ps1
+
+    # Specific month and subscription list
+    .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 3 -SubscriptionIdList '11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222'
+
+    # Process a subset of subscriptions by index range
+    .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 3 -SubRangeStartEnd 20,310
+
+    # Authenticate first (optional) and run against a single subscription:
+    Connect-AzAccount -TenantId '<tenant-id>' -SubscriptionId '<subscription-id>'
+    .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 3 -SubscriptionIdList '<subscription-id>'
+
     Notes:
     - The script requires the Az.Accounts and Az.OperationalInsights modules.
     - Output CSV files are written to the current working directory and are named like:
@@ -459,8 +480,8 @@ function Measure-AvailabilityMetrics {
 
     return @{
         TotalHoursInMonth               = $totalHoursInMonth
-        AvailabilityRate                = [double]$ResultRow.availability_rate
-        AvailabilityRateWithSuppression = [double]$availabilityRateWithSuppression
+        AvailabilityRate                = $availabilityRate
+        AvailabilityRateWithSuppression = $availabilityRateWithSuppression
         DownRate                        = [double]$ResultRow.down_rate
         DownRateWithSuppression         = (100 - $availabilityRateWithSuppression)
         TotalHoursDown                  = [math]::Round($ResultRow.total_down_hours, 2)
