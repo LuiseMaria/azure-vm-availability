@@ -1,4 +1,14 @@
-﻿# Azure Resource Graph Query for VM/Arcs Availability Report
+﻿# PowerShell Script using Azure Monitor Logs, Azure Resource Graph Explorer and Suppresion Alert Rules for calculating VM and Arc Machine Availability
+
+### Example, how to run Script for getting Data from all LAWs in tenant e.g. from 01. Sep - 30. Sep 2025:
+
+````powershell
+    .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 9
+````
+*Depending on how many Log Analytics Workspaces (LAWs) exist in tenant, the script may take some time to run because it retrieves data from all LAWs.
+For more than 400 LAWs and > 1000 Machines, execution typically takes about 10–30 minutes.*
+
+### KQL for VM/Arcs Availability
 
 **1. Retrieve Heartbeats for VMs "microsoft.compute/virtualmachines"**
 
