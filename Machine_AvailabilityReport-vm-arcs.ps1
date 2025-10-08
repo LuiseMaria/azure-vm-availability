@@ -483,7 +483,7 @@ function Measure-AvailabilityMetrics {
         AvailabilityRate                = $availabilityRate
         AvailabilityRateWithSuppression = $availabilityRateWithSuppression
         DownRate                        = [double]$ResultRow.down_rate
-        DownRateWithSuppression         = (100 - $availabilityRateWithSuppression)
+        DownRateWithSuppression         = [math]::Round((100 - $availabilityRateWithSuppression), 2)
         TotalHoursDown                  = [math]::Round($ResultRow.total_down_hours, 2)
         TotalHoursAvailable             = [math]::Round($ResultRow.total_available_hours, 2)
         UnobservedHours                 = [math]::Round($totalHoursInMonth - [math]::Round((([datetime]$ResultRow.LastHeartbeat) - ([datetime]$ResultRow.FirstHeartbeat)).TotalHours, 3), 0)
