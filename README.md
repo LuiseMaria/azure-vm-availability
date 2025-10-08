@@ -1,4 +1,5 @@
-﻿# PowerShell Script using Azure Monitor Logs, Azure Resource Graph Explorer and Suppresion Alert Rules for calculating VM and Arc Machine Availability
+﻿# PowerShell Script calculating VM and Arc Machine Availability
+## ➡️ using **Azure Monitor Logs** for Heartbeats, **Azure Resource Graph Explorer** for Suppression Alert Rules, VM/Arc Machine Status and last but not least **Azure REST API**
 
 ### Example, how to run Script for getting Data from all LAWs in tenant e.g. from 01. Sep - 30. Sep 2025:
 
