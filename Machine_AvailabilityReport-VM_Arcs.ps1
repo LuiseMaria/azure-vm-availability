@@ -635,13 +635,13 @@ function Update-ResultList {
 
 $global:CurrentWorkspaceIndex = 1
 $QueryResultList = New-Object System.Collections.Generic.List[PSCustomObject]
+$kqlQueries = @($VMHeartbeatsKQL, $ArcMachineHeartbeatsKQL) | Where-Object { $_ }
+
 # ------ starting to query each LAW for Heartbeats (VM/Arc Machines) ---------- 
 foreach ($workspace in $LogAnalyticsWorkspacesInTenant) {
     Write-Log "[$($global:CurrentWorkspaceIndex)/$($script:LogAnalyticsWorkspacesInTenant.count)] Querying Log Analytics Workspace: $($Workspace.name)" -Severity Console -Color Black
-    @($VMHeartbeatsKQL, $ArcMachineHeartbeatsKQL) | ForEach-Object {
-        if($_) {   
-            Invoke-DataPerLAW -Workspace $workspace -MachineHeartbeatsKQL $_
-        }
+    foreach ($kql in $kqlQueries) {
+        Invoke-DataPerLAW -Workspace $workspace -MachineHeartbeatsKQL $kql
     }
     $global:CurrentWorkspaceIndex++
 }
