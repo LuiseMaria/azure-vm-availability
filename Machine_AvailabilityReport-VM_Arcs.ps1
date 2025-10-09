@@ -496,7 +496,7 @@ function Merge-MachineWithStatus {
     if ($resourceType -eq "virtualMachines") {
         $status = $script:VmStatusById[$ResultRow._ResourceId] ?? 'unknown/deleted'
     }
-    else {
+    elseif ($resourceType -eq "machines") {
         $status = $script:ArcMachinesStatusById[$ResultRow._ResourceId] ?? 'unknown/deleted'
     }
 
