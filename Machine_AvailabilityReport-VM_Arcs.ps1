@@ -506,8 +506,8 @@ function Get-SuppressionDuration {
 
     try {
         $duration = 0
-        $StartTimeResetedSeconds = (Get-Date ([datetime]$MachineData.Start)) -Second 0
-        $EndTimeResetedSeconds = (Get-Date ([datetime]$MachineData.End)) -Second 0
+        $StartTimeResetedSeconds = (Get-Date ([datetime]$MachineData.Start) -Second 0)
+        $EndTimeResetedSeconds = (Get-Date ([datetime]$MachineData.End) -Second 0)
         foreach ($rule in $script:SuppressionRulesInTenant) {  
             $rule | Where-Object { $MachineData.ResourceId -in $_.Scopes } | ForEach-Object {
                 $ruleStart = if ($_.effectiveFrom) { ($_.effectiveFrom).ToUniversalTime() } else { [datetime]::MinValue }
