@@ -329,7 +329,7 @@ function Initialize-TenantData {
         if ($SubscriptionIdList -and $SubscriptionIdList.Count -gt 0) {
             Get-LogAnalyticsWorkspaces -SubscriptionIds $SubscriptionIdList
             Get-AlertSuppressionRulesInTenant -SubscriptionIds $SubscriptionIdList
-            if ($ResourceType -in 'VM', 'All') {
+            if($ResourceType -in 'VM', 'All') {
                 Get-VMsInTenant -SubscriptionIds $SubscriptionIdList
             }
             if ($ResourceType -in 'Arc', 'All') {
@@ -340,8 +340,12 @@ function Initialize-TenantData {
             # fallback to tenant scope
             Get-LogAnalyticsWorkspaces
             Get-AlertSuppressionRulesInTenant
-            Get-VMsInTenant
-            Get-ArcMachinesInTenant
+            if($ResourceType -in 'VM', 'All') {
+                Get-VMsInTenant
+            }
+            if ($ResourceType -in 'Arc', 'All') {
+                Get-ArcMachinesInTenant
+            }
         }
         Write-Log "Initialization complete: $($LogAnalyticsWorkspacesInTenant.Count) LAWs, $($VmsInTenant.Count) VMs, $($ArcMachinesInTenant.Count) Arc Machines, $($SuppressionRulesInTenant.Count) suppression rules found." -Severity Debug
     }
@@ -356,7 +360,7 @@ Write-Log "Starting to query Subscriptions, LAWs, Suppression Rules, and optiona
 Initialize-TenantData -SubscriptionIdListParam $SubscriptionIdList
 
 # KQL - retrieves the uptime of VMs for the previous month, excluding VMs with names starting with "vba" or ending with "-tmp".
-if($ResourceType -eq 'VM' -or $ResourceType -eq 'All') {
+if($ResourceType -in 'VM', 'All') {
     $VMHeartbeatsKQL = @"
 let timeRangeEnd = endofmonth(datetime($($UtcTimeRangeStartDate)));
 let timeRangeStart = startofmonth(timeRangeEnd);
@@ -386,7 +390,7 @@ down_rate, availability_rate, total_available_hours, total_down_hours = round((t
 }
 
 # KQL - retrieves the uptime of Arc Machines for the previous month.
-if($ResourceType -eq 'Arc' -or $ResourceType -eq 'All') {
+if ($ResourceType -in 'Arc', 'All') {
     $ArcMachineHeartbeatsKQL = @"
 let timeRangeEnd = (endofmonth(datetime($($UtcTimeRangeStartDate))));
 let timeRangeStart = startofmonth(timeRangeEnd);
@@ -502,8 +506,8 @@ function Get-SuppressionDuration {
 
     try {
         $duration = 0
-        $StartTimeResetedSeconds = (Get-Date ([datetime]($MachineData.Start)) -Second 0).ToUniversalTime()
-        $EndTimeResetedSeconds = (Get-Date ([datetime]($MachineData.End)) -Second 0).ToUniversalTime()
+        $StartTimeResetedSeconds = (Get-Date ([datetime]$MachineData.Start)) -Second 0
+        $EndTimeResetedSeconds = (Get-Date ([datetime]$MachineData.End)) -Second 0
         foreach ($rule in $script:SuppressionRulesInTenant) {  
             $rule | Where-Object { $MachineData.ResourceId -in $_.Scopes } | ForEach-Object {
                 $ruleStart = if ($_.effectiveFrom) { ($_.effectiveFrom).ToUniversalTime() } else { [datetime]::MinValue }
@@ -647,7 +651,7 @@ $queryMonth = ([datetime]$QueryResultList.TimeRangeStart[0]).ToString("MMM")
 if($ResourceType -eq "All") {
     $ResourceType = "VM_Arc"
 }
-$outputFileName = "$($ExportFilePath)$($queryMonth)_Type_$($ResourceType)_$($LogSessionId).csv"
+$outputFileName = "$($ExportFilePath)$($queryMonth)_Output_$($ResourceType)_$($LogSessionId).csv"
 $QueryResultList | Sort-Object ResourceType, MachineName | Export-Csv -Path $outputFileName -Delimiter "," -Encoding UTF8
 
 # Count unique VMs and Arc machines in the result list
