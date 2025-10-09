@@ -88,7 +88,7 @@ param (
     [int[]]$SubRangeStartEnd, # Provide exactly two integers to define a range (e.g. 20,310)
     $ExportFilePath = "./Machine_Availability_", # Optional: Directory path to save the output CSV files. Default: current directory.
     [ValidateSet('All', 'VM', 'Arc')]
-    [string]$ResourceType = 'All'
+    [string]$ResourceScope = 'VM'
 )
 
 # $tenantId = "xxxxxx-xxxx-xxxxx-xxxx-xxxxxxxxx"
@@ -329,10 +329,10 @@ function Initialize-TenantData {
         if ($SubscriptionIdList -and $SubscriptionIdList.Count -gt 0) {
             Get-LogAnalyticsWorkspaces -SubscriptionIds $SubscriptionIdList
             Get-AlertSuppressionRulesInTenant -SubscriptionIds $SubscriptionIdList
-            if($ResourceType -in 'VM', 'All') {
+            if($ResourceScope -in 'VM', 'All') {
                 Get-VMsInTenant -SubscriptionIds $SubscriptionIdList
             }
-            if ($ResourceType -in 'Arc', 'All') {
+            if ($ResourceScope -in 'Arc', 'All') {
                 Get-ArcMachinesInTenant -SubscriptionIds $SubscriptionIdList
             }
         }
@@ -340,14 +340,14 @@ function Initialize-TenantData {
             # fallback to tenant scope
             Get-LogAnalyticsWorkspaces
             Get-AlertSuppressionRulesInTenant
-            if($ResourceType -in 'VM', 'All') {
+            if($ResourceScope -in 'VM', 'All') {
                 Get-VMsInTenant
             }
-            if ($ResourceType -in 'Arc', 'All') {
+            if ($ResourceScope -in 'Arc', 'All') {
                 Get-ArcMachinesInTenant
             }
         }
-        Write-Log "Initialization complete: $($LogAnalyticsWorkspacesInTenant.Count) LAWs, $($VmsInTenant.Count) VMs, $($ArcMachinesInTenant.Count) Arc Machines, $($SuppressionRulesInTenant.Count) suppression rules found." -Severity Debug
+        Write-Log "Initialization for ResourceScope '$ResourceScope': complete: $($LogAnalyticsWorkspacesInTenant.Count) LAWs, $($VmsInTenant.Count) VMs, $($ArcMachinesInTenant.Count) Arc Machines, $($SuppressionRulesInTenant.Count) suppression rules found." -Severity Debug
     }
     catch {
         Write-Log "Initialize-TenantData failed: $_" -Severity Error
