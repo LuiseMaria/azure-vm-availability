@@ -388,6 +388,9 @@ FilteredHeartbeat
 down_rate, availability_rate, total_available_hours, total_down_hours = round((total_minutes - capped_minutes) / 60.0, 3), total_hours_in_month = round(datetime_diff("minute", timeRangeEnd, timeRangeStart) / 60.0, 1)
 "@
 }
+else {
+    $VMHeartbeatsKQL = $null
+}
 
 # KQL - retrieves the uptime of Arc Machines for the previous month.
 if ($ResourceType -in 'Arc', 'All') {
@@ -415,6 +418,9 @@ FilteredHeartbeat
 | project Resource, ResourceType, RG, _ResourceId, SubscriptionId, timeRangeStart, timeRangeEnd, FirstHeartbeat=start_time, LastHeartbeat=machine_end,
 down_rate, availability_rate, total_available_hours, total_down_hours = round((total_minutes - capped_minutes) / 60.0, 3), total_hours_in_month = round(datetime_diff("minute", timeRangeEnd, timeRangeStart) / 60.0, 1)
 "@
+}
+else {
+    $ArcMachineHeartbeatsKQL = $null
 }
 
 function Invoke-DataPerLAW {
