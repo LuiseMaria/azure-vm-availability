@@ -671,17 +671,19 @@ $arcCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'machines' } 
 Write-Log "For month $($queryMonth): Queried data with $($QueryResultList.Count) entries. Unique VM number: $vmCount. Unique Arc machine number: $arcCount." -Severity Debug
 
 if($vmCount -gt 0 -and $arcCount -gt 0) {
-    $ResourceScope = "VM_Arc"
+    $Scope = "VM_Arc"
+} else {
+    $scope = $ResourceScope
 }
 
-$outputFileName = "$($ExportFilePath)$($queryMonth)_Output_$($ResourceScope)_$($LogSessionId).csv"
+$outputFileName = "$($ExportFilePath)$($queryMonth)_Report_$($Scope)_$($LogSessionId).csv"
 $QueryResultList | Sort-Object ResourceType, MachineName | Export-Csv -Path $outputFileName -Delimiter "," -Encoding UTF8
 
 
 ### Identify Machines that had no data in LAW
 $vmNotInLaw = Compare-Object ($QueryResultList | Sort-Object -Unique ResourceId) ($script:VmsInTenant) -Property ResourceId -PassThru | Where-Object { $_.SideIndicator -eq '=>' }
 $arcsNotInLaw = Compare-Object ($QueryResultList | Sort-Object -Unique ResourceId) ($script:ArcMachinesInTenant) -Property ResourceId -PassThru | Where-Object { $_.SideIndicator -eq '=>' }
-Write-Log "Machines not founding data in LAW: $($vmNotInLaw.Count) $($arcsNotInLaw.Count)" -Severity Debug -Color Magenta
+Write-Log "Machines not founding data in LAW: $($vmNotInLaw.Count) VMs, $($arcsNotInLaw.Count) Arc Machines" -Severity Debug -Color Magenta
 Write-Log "Unresolved VMs: $($vmNotInLaw.MachineName -join ', ')" -Severity Info
 Write-Log "Unresolved Arc Machines: $($arcsNotInLaw.MachineName -join ', ')" -Severity Info
 
