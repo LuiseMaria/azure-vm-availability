@@ -85,7 +85,7 @@ param (
     [int]$ReportMonth, # Month for which the report is generated (1-12)
     [string[]]$SubscriptionIdList, # Optional: Specify n Subscription IDs to limit the report to those subscriptions only. If not provided, all accessible subscriptions in Tenant will be included.
     [ValidateCount(2, 2)]
-    [int[]]$SubRangeStartEnd = (5, 100), # Provide exactly two integers to define a range (e.g. 20,310)
+    [int[]]$SubRangeStartEnd, # Provide exactly two integers to define a range (e.g. 20,310)
     $ExportFilePath = "./Machine_Availability_", # Optional: Directory path to save the output CSV files. Default: current directory.
     [ValidateSet('All', 'VM', 'Arc')]
     [string]$ResourceType = 'All'
