@@ -681,11 +681,11 @@ $QueryResultList | Sort-Object ResourceType, MachineName | Export-Csv -Path $out
 
 
 ### Identify Machines that had no data in LAW
-$vmNotInLaw = Compare-Object ($QueryResultList | Sort-Object -Unique ResourceId) ($script:VmsInTenant) -Property ResourceId -PassThru | Where-Object { $_.SideIndicator -eq '=>' }
-$arcsNotInLaw = Compare-Object ($QueryResultList | Sort-Object -Unique ResourceId) ($script:ArcMachinesInTenant) -Property ResourceId -PassThru | Where-Object { $_.SideIndicator -eq '=>' }
+$vmNotInLaw = Compare-Object ($QueryResultList | Sort-Object -Unique ResourceId) ($script:VmsInTenant) -Property ResourceId -PassThru | Where-Object { $_.SideIndicator -eq '=>' } | Select-Object -Property Name, ResourceId
+$arcsNotInLaw = Compare-Object ($QueryResultList | Sort-Object -Unique ResourceId) ($script:ArcMachinesInTenant) -Property ResourceId -PassThru | Where-Object { $_.SideIndicator -eq '=>' } | Select-Object -Property Name, ResourceId
 Write-Log "Machines not founding data in LAW: $($vmNotInLaw.Count) VMs, $($arcsNotInLaw.Count) Arc Machines" -Severity Debug -Color Magenta
-Write-Log "Unresolved VMs: $($vmNotInLaw.MachineName -join ', ')" -Severity Info
-Write-Log "Unresolved Arc Machines: $($arcsNotInLaw.MachineName -join ', ')" -Severity Info
+Write-Log "Unresolved VMs: $($vmNotInLaw.Name -join ', ')" -Severity Info
+Write-Log "Unresolved Arc Machines: $($arcsNotInLaw.Name -join ', ')" -Severity Info
 
 
 $scriptRunTime = (Get-Date).Subtract([datetime]($scriptStartTime))
