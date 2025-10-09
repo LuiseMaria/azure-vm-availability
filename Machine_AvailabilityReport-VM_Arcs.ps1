@@ -198,7 +198,7 @@ function Get-VMsInTenant {
         [string[]]$SubscriptionIds # optional, if not provided, will search with -UseTenantScope (Search-AzGraph)
     )
     try {
-        $azGraphGetVMQuery = "resources | where type =~ 'microsoft.compute/virtualmachines' | project name, id, subscriptionId, powerState = properties.extended.instanceView.powerState.displayStatus | sort by tolower(subscriptionId) asc"
+        $azGraphGetVMQuery = "resources | where type =~ 'microsoft.compute/virtualmachines' | extend timeCreated = todatetime(properties.timeCreated) | where timeCreated < (endofmonth(datetime($($UtcTimeRangeStartDate)))) | project name, id, subscriptionId, powerState = properties.extended.instanceView.powerState.displayStatus, timeCreated | sort by tolower(subscriptionId) asc"
         $useTenantScope = -not $($SubscriptionIds)
 
         if($useTenantScope) {
