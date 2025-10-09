@@ -329,10 +329,10 @@ function Initialize-TenantData {
         if ($SubscriptionIdList -and $SubscriptionIdList.Count -gt 0) {
             Get-LogAnalyticsWorkspaces -SubscriptionIds $SubscriptionIdList
             Get-AlertSuppressionRulesInTenant -SubscriptionIds $SubscriptionIdList
-            if ($ResourceTypeParam -in 'VM', 'All') {
+            if ($ResourceType -in 'VM', 'All') {
                 Get-VMsInTenant -SubscriptionIds $SubscriptionIdList
             }
-            elseif ($ResourceTypeParam -in 'Arc', 'All') {
+            if ($ResourceType -in 'Arc', 'All') {
                 Get-ArcMachinesInTenant -SubscriptionIds $SubscriptionIdList
             }
         }
