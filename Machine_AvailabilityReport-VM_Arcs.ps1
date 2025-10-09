@@ -665,10 +665,10 @@ foreach ($workspace in $LogAnalyticsWorkspacesInTenant) {
 $queryMonth = ([datetime]$QueryResultList.TimeRangeStart[0]).ToString("MMM")
 
 # Count unique VMs and Arc machines in the result list
-$vmCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'virtualMachines' } | Select-Object -Unique MachineName).Count
-$arcCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'machines' } | Select-Object -Unique MachineName).Count
+$vmCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'virtualMachines' } | Sort-Object -Unique ResourceId).Count
+$arcCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'machines' } | Sort-Object -Unique ResourceId).Count
 
-Write-Log "For month $($queryMonth): Queried data from $($QueryResultList.Count) Machines. VM count: $vmCount. Arc machine count: $arcCount." -Severity Debug
+Write-Log "For month $($queryMonth): Queried data with $($QueryResultList.Count) entries. Unique VM number: $vmCount. Unique Arc machine number: $arcCount." -Severity Debug
 
 if($vmCount -gt 0 -and $arcCount -gt 0) {
     $ResourceScope = "VM_Arc"
@@ -679,31 +679,12 @@ $QueryResultList | Sort-Object ResourceType, MachineName | Export-Csv -Path $out
 
 
 ### Identify Machines that had no data in LAW
-$machineWithoutLAW = @()
+$vmNotInLaw = Compare-Object ($QueryResultList | Sort-Object -Unique ResourceId) ($script:VmsInTenant) -Property ResourceId -PassThru | Where-Object { $_.SideIndicator -eq '=>' }
+$arcsNotInLaw = Compare-Object ($QueryResultList | Sort-Object -Unique ResourceId) ($script:ArcMachinesInTenant) -Property ResourceId -PassThru | Where-Object { $_.SideIndicator -eq '=>' }
+Write-Log "Machines not founding data in LAW: $($vmNotInLaw.Count) $($arcsNotInLaw.Count)" -Severity Debug -Color Magenta
+Write-Log "Unresolved VMs: $($vmNotInLaw.MachineName -join ', ')" -Severity Info
+Write-Log "Unresolved Arc Machines: $($arcsNotInLaw.MachineName -join ', ')" -Severity Info
 
-foreach ($entry in $QueryResultList) {
-    $rid = $entry.ResourceId
-
-    $inVm = $false
-    $inArc = $false
-
-    if ($script:VmStatusById -and $script:VmStatusById.ContainsKey($rid)) {
-        $inVm = $true
-    }
-    if ($script:ArcMachinesStatusById -and $script:ArcMachinesStatusById.ContainsKey($rid)) {
-        $inArc = $true
-    }
-
-    if (-not ($inVm -or $inArc)) {
-        $machineWithoutLAW += $entry
-    }
-}
-
-if ($machineWithoutLAW.Count -gt 0) {
-    Write-Log "Machines not founding data in LAW: $($machineWithoutLAW.Count)" -Severity Debug -Color Magenta
-    Write-Log "Unresolved Machines: $($machineWithoutLAW.MachineName -join ', ')" -Severity Info
-    $machineWithoutLAW | Format-List -Property SubscriptionId, ResourceGroup, MachineName, ResourceType
-}
 
 $scriptRunTime = (Get-Date).Subtract([datetime]($scriptStartTime))
 Write-Log "Script started at: $scriptStartTime. Script ended at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'). Duration: $($scriptRunTime.Hours)h $($scriptRunTime.Minutes)m $($scriptRunTime.Seconds)s" -Color Green -Severity Debug
