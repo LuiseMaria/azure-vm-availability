@@ -28,7 +28,7 @@
 .PARAMETER ExportFilePath
     [string] Optional. Directory path to save the output CSV files. Default: current directory.
 
-.PARAMETER ResourceType
+.PARAMETER ResourceScope
     [string] Optional. Type of resources to include in the report. Valid values are 'All' (default), 'VM', or 'Arc'.
     - 'All': Includes both Azure Virtual Machines and Azure Arc-enabled servers.
     - 'VM': Includes only Azure Virtual Machines.
@@ -71,6 +71,15 @@
     Connect-AzAccount -TenantId '<tenant-id>' -SubscriptionId '<subscription-id>'
     .\Machine_AvailabilityReport-VM_Arcs.ps1 -ReportMonth 3 -SubscriptionIdList '<subscription-id>'
 
+    # Report VMs only 
+    .\Machine_AvailabilityReport-VM_Arcs.ps1 -ReportMonth 3 -ResourceScope VM
+
+    # Report Arc machines only
+    .\Machine_AvailabilityReport-VM_Arcs.ps1 -ReportMonth 3 -ResourceScope Arc
+
+    # Report both VMs and Arc machines (default behavior)
+    .\Machine_AvailabilityReport-VM_Arcs.ps1 -ReportMonth 3 -ResourceScope All
+
     Notes:
     - The script requires the Az.Accounts and Az.OperationalInsights modules.
     - Output CSV files are written to the current working directory and are named like:
@@ -88,7 +97,7 @@ param (
     [int[]]$SubRangeStartEnd, # Provide exactly two integers to define a range (e.g. 20,310)
     $ExportFilePath = "./Machine_Availability_", # Optional: Directory path to save the output CSV files. Default: current directory.
     [ValidateSet('All', 'VM', 'Arc')]
-    [string]$ResourceScope = 'VM'
+    [string]$ResourceScope = 'All'
 )
 
 # $tenantId = "xxxxxx-xxxx-xxxxx-xxxx-xxxxxxxxx"
@@ -360,7 +369,7 @@ Write-Log "Starting to query Subscriptions, LAWs, Suppression Rules, and optiona
 Initialize-TenantData -SubscriptionIdListParam $SubscriptionIdList
 
 # KQL - retrieves the uptime of VMs for the previous month, excluding VMs with names starting with "vba" or ending with "-tmp".
-if($ResourceType -in 'VM', 'All') {
+if($ResourceScope -in 'VM', 'All') {
     $VMHeartbeatsKQL = @"
 let timeRangeEnd = endofmonth(datetime($($UtcTimeRangeStartDate)));
 let timeRangeStart = startofmonth(timeRangeEnd);
@@ -393,7 +402,7 @@ else {
 }
 
 # KQL - retrieves the uptime of Arc Machines for the previous month.
-if ($ResourceType -in 'Arc', 'All') {
+if ($ResourceScope -in 'Arc', 'All') {
     $ArcMachineHeartbeatsKQL = @"
 let timeRangeEnd = (endofmonth(datetime($($UtcTimeRangeStartDate))));
 let timeRangeStart = startofmonth(timeRangeEnd);
@@ -652,22 +661,25 @@ foreach ($workspace in $LogAnalyticsWorkspacesInTenant) {
     $global:CurrentWorkspaceIndex++
 }
 
-# ------ Exporting results to CSV ----------
+# ------ Result Handling & exporting results to CSV ----------
 $queryMonth = ([datetime]$QueryResultList.TimeRangeStart[0]).ToString("MMM")
-if($ResourceType -eq "All") {
-    $ResourceType = "VM_Arc"
-}
-$outputFileName = "$($ExportFilePath)$($queryMonth)_Output_$($ResourceType)_$($LogSessionId).csv"
-$QueryResultList | Sort-Object ResourceType, MachineName | Export-Csv -Path $outputFileName -Delimiter "," -Encoding UTF8
 
 # Count unique VMs and Arc machines in the result list
-$vmCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'virtualMachines' }).Count
-$arcCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'machines' }).Count
+$vmCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'virtualMachines' } | Select-Object -Unique MachineName).Count
+$arcCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'machines' } | Select-Object -Unique MachineName).Count
 
 Write-Log "For month $($queryMonth): Queried data from $($QueryResultList.Count) Machines. VM count: $vmCount. Arc machine count: $arcCount." -Severity Debug
 
+if($vmCount -gt 0 -and $arcCount -gt 0) {
+    $ResourceScope = "VM_Arc"
+}
+
+$outputFileName = "$($ExportFilePath)$($queryMonth)_Output_$($ResourceScope)_$($LogSessionId).csv"
+$QueryResultList | Sort-Object ResourceType, MachineName | Export-Csv -Path $outputFileName -Delimiter "," -Encoding UTF8
+
+
 ### Identify Machines that had no data in LAW
-if (-not $script:machineWithoutLAW) { $script:machineWithoutLAW = @() }
+$machineWithoutLAW = @()
 
 foreach ($entry in $QueryResultList) {
     $rid = $entry.ResourceId
@@ -683,7 +695,7 @@ foreach ($entry in $QueryResultList) {
     }
 
     if (-not ($inVm -or $inArc)) {
-        $script:machineWithoutLAW += $entry
+        $machineWithoutLAW += $entry
     }
 }
 
