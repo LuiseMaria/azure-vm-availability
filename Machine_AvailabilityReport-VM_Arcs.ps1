@@ -13,7 +13,7 @@
     Time ranges are handled in UTC.
 
 .PARAMETER ReportMonth
-    [int] Optional. Month (1-12) to run the report for. If omitted, the script defaults to the previous calendar month
+    [int] Required. Month (1-12) to run the report for. If omitted, the script defaults to the previous calendar month
     of the current year.
 
 .PARAMETER SubscriptionIdList
@@ -24,6 +24,15 @@
     [int[]] Optional. Two-element array or comma-separated pair (start,end). When supplied, the script processes only the
     subset of subscriptions in the enumerated list from index start (inclusive) to end (inclusive). Useful for batching
     work across large tenants. For Example, to process subscriptions 20 through end, use "-SubRangeStartEnd 20,-1".
+
+.PARAMETER ExportFilePath
+    [string] Optional. Directory path to save the output CSV files. Default: current directory.
+
+.PARAMETER ResourceType
+    [string] Optional. Type of resources to include in the report. Valid values are 'All' (default), 'VM', or 'Arc'.
+    - 'All': Includes both Azure Virtual Machines and Azure Arc-enabled servers.
+    - 'VM': Includes only Azure Virtual Machines.
+    - 'Arc': Includes only Azure Arc-enabled servers.
 
 .OUTPUTS
     Machine_Availability_<Mon>_<yyyyMMdd_HHmm>.csv
@@ -50,17 +59,17 @@
 
 .EXAMPLE
     # Default: previous month across all accessible subscriptions
-    .\Machine_AvailabilityReport-vm-arcs.ps1
+    .\Machine_AvailabilityReport-VM_Arcs.ps1
 
     # Specific month and subscription list
-    .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 3 -SubscriptionIdList '11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222'
+    .\Machine_AvailabilityReport-VM_Arcs.ps1 -ReportMonth 3 -SubscriptionIdList '11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222'
 
     # Process a subset of subscriptions by index range
-    .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 3 -SubRangeStartEnd 20,310
+    .\Machine_AvailabilityReport-VM_Arcs.ps1 -ReportMonth 3 -SubRangeStartEnd 20,310
 
     # Authenticate first (optional) and run against a single subscription:
     Connect-AzAccount -TenantId '<tenant-id>' -SubscriptionId '<subscription-id>'
-    .\Machine_AvailabilityReport-vm-arcs.ps1 -ReportMonth 3 -SubscriptionIdList '<subscription-id>'
+    .\Machine_AvailabilityReport-VM_Arcs.ps1 -ReportMonth 3 -SubscriptionIdList '<subscription-id>'
 
     Notes:
     - The script requires the Az.Accounts and Az.OperationalInsights modules.
@@ -76,7 +85,7 @@ param (
     [int]$ReportMonth, # Month for which the report is generated (1-12)
     [string[]]$SubscriptionIdList, # Optional: Specify n Subscription IDs to limit the report to those subscriptions only. If not provided, all accessible subscriptions in Tenant will be included.
     [ValidateCount(2, 2)]
-    [int[]]$SubRangeStartEnd, # Provide exactly two integers to define a range (e.g. 20,310)
+    [int[]]$SubRangeStartEnd = (5, 100), # Provide exactly two integers to define a range (e.g. 20,310)
     $ExportFilePath = "./Machine_Availability_", # Optional: Directory path to save the output CSV files. Default: current directory.
     [ValidateSet('All', 'VM', 'Arc')]
     [string]$ResourceType = 'All'
@@ -130,7 +139,7 @@ Write-Log "$scriptStartTime - Starting script for month '$ReportMonth'." -Severi
 
 function Get-EnabledSubscriptions {
     try {
-        $response = Invoke-AzRestMethod -Method Get -Uri "https://management.azure.com/subscriptions?api-version=2022-12-01"
+        $response = Invoke-AzRestMethod -Method Get -Uri "https://management.azure.com/subscriptions?api-version=2022-12-01" -ErrorAction Stop
         $subs = (($response.Content | ConvertFrom-Json).value | Where-Object { $_.state -eq "Enabled" }).SubscriptionId
         if (-not $subs -or $subs.Count -eq 0) {
             Write-Log "ERROR: No available subscriptions found." -Severity Error
@@ -144,7 +153,7 @@ function Get-EnabledSubscriptions {
         return $($subs)
     }
     catch {
-        Write-Log "Error retrieving subscriptions: $_" -Severity Error
+        Write-Log "Error retrieving subscriptions: $_. Please run Connect-AzAccount with your credentials." -Severity Error
         exit 1
     }
 }
@@ -286,35 +295,65 @@ function Merge-Law {
     return ($array | Sort-Object) -join ', '
 }
 
+function Initialize-TenantData {
+    param(
+        [string[]]$SubscriptionIdListParam
+    )
+    try {
+        # GET Suppression Rule List, Subscriptions and Workspace List &  for all Subscriptions
+        $script:SuppressionRulesInTenant = @()
+        $script:LogAnalyticsWorkspacesInTenant = @()
+        $script:VmsInTenant = @()
+        $script:VmStatusById = New-Object 'System.Collections.Generic.Dictionary[string, string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
-# GET Suppression Rule List, Subscriptions and Workspace List &  for all Subscriptions
-$script:SuppressionRulesInTenant = @()
-$script:LogAnalyticsWorkspacesInTenant = @()
-$script:VmsInTenant = @()
-$script:VmStatusById = New-Object 'System.Collections.Generic.Dictionary[string, string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        $script:ArcMachinesInTenant = @()
+        $script:ArcMachinesStatusById = New-Object 'System.Collections.Generic.Dictionary[string, string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
-$script:ArcMachinesInTenant = @()
-$script:ArcMachinesStatusById = New-Object 'System.Collections.Generic.Dictionary[string, string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        # Resolve subscriptions (either provided or enumerate enabled ones)
+        if (-not $SubscriptionIdListParam -or $SubscriptionIdListParam.Count -eq 0) {
+            $subscriptions = Get-EnabledSubscriptions
+            # keep the param variable in sync for downstream functions
+            $script:SubscriptionIdList = $subscriptions
+        }
+        else {
+            $subscriptions = $SubscriptionIdListParam
+            $script:SubscriptionIdList = $SubscriptionIdListParam
+        }
 
+        # expose resolved subscription list to script scope (used by other functions)
+        $script:Subscriptions = $subscriptions
 
-if(-not $SubscriptionIdList) {
-    Write-Log "Starting to query Subscriptions, LAWs, Suppression Rules, and optional VMs and/or Arc Machines in TenantScope..." -Severity Debug
-    $subscriptions = (Get-EnabledSubscriptions)
-    Get-LogAnalyticsWorkspaces
-    Get-AlertSuppressionRulesInTenant
-    if ($ResourceType -eq 'VM' -or $ResourceType -eq 'All') { Get-VMsInTenant }
-    if ($ResourceType -eq 'Arc' -or $ResourceType -eq 'All') { Get-ArcMachinesInTenant }
+        Write-Log "Resolved $($subscriptions.Count) subscription(s). Querying tenant data (LAWs, suppression rules, VM/Arc lists)..." -Severity Debug Color Green
+
+        # Retrieve Log Analytics Workspaces and suppression rules, scoped to subscriptions when provided
+        if ($SubscriptionIdList -and $SubscriptionIdList.Count -gt 0) {
+            Get-LogAnalyticsWorkspaces -SubscriptionIds $SubscriptionIdList
+            Get-AlertSuppressionRulesInTenant -SubscriptionIds $SubscriptionIdList
+            if ($ResourceTypeParam -in 'VM', 'All') {
+                Get-VMsInTenant -SubscriptionIds $SubscriptionIdList
+            }
+            elseif ($ResourceTypeParam -in 'Arc', 'All') {
+                Get-ArcMachinesInTenant -SubscriptionIds $SubscriptionIdList
+            }
+        }
+        else {
+            # fallback to tenant scope
+            Get-LogAnalyticsWorkspaces
+            Get-AlertSuppressionRulesInTenant
+            Get-VMsInTenant
+            Get-ArcMachinesInTenant
+        }
+        Write-Log "Initialization complete: $($LogAnalyticsWorkspacesInTenant.Count) LAWs, $($VmsInTenant.Count) VMs, $($ArcMachinesInTenant.Count) Arc Machines, $($SuppressionRulesInTenant.Count) suppression rules found." -Severity Debug
+    }
+    catch {
+        Write-Log "Initialize-TenantData failed: $_" -Severity Error
+        exit 1
+    }
 }
-else {
-    Write-Log "Starting to query LAWs, Suppression Rules and VMs in for Subscription ID(s): '$($SubscriptionIdList)...'" -Severity Debug
-    $subscriptions = $SubscriptionIdList
-    Get-AlertSuppressionRulesInTenant -SubscriptionIds $SubscriptionIdList
-    Get-LogAnalyticsWorkspaces -SubscriptionIds $SubscriptionIdList
-    if ($ResourceType -eq 'VM' -or $ResourceType -eq 'All') { Get-VMsInTenant -SubscriptionIds $SubscriptionIdList }
-    if ($ResourceType -eq 'Arc' -or $ResourceType -eq 'All') { Get-ArcMachinesInTenant -SubscriptionIds $SubscriptionIdList }
-}
-Write-Log "For ResourceType '$($ResourceType)' found $($LogAnalyticsWorkspacesInTenant.Count) LAWs, $($VmsInTenant.Count) VMs, $($ArcMachinesInTenant.Count) Arc Machines and $($SuppressionRulesInTenant.Count) Suppression Rules in Tenant ($($subscriptions.Count) Subscriptions)." -Color Yellow -Severity Debug
 
+
+Write-Log "Starting to query Subscriptions, LAWs, Suppression Rules, and optional VMs and/or Arc Machines in TenantScope..." -Severity Debug
+Initialize-TenantData -SubscriptionIdListParam $SubscriptionIdList
 
 # KQL - retrieves the uptime of VMs for the previous month, excluding VMs with names starting with "vba" or ending with "-tmp".
 if($ResourceType -eq 'VM' -or $ResourceType -eq 'All') {
@@ -381,9 +420,6 @@ function Invoke-DataPerLAW {
         $Workspace,
         [string]$MachineHeartbeatsKQL
     )
-
-    Write-Log "[$($global:CurrentWorkspaceIndex)/$($script:LogAnalyticsWorkspacesInTenant.count)] Querying Log Analytics Workspace: $($Workspace.name)" -Severity Console -Color Black
-    $global:CurrentWorkspaceIndex++
 
     try {
         # run kql (Arc Machine Heartbeats/VM Heartbeats) for each LAW
@@ -595,44 +631,56 @@ function Update-ResultList {
 
 $global:CurrentWorkspaceIndex = 1
 $QueryResultList = New-Object System.Collections.Generic.List[PSCustomObject]
-
+# ------ starting to query each LAW for Heartbeats (VM/Arc Machines) ---------- 
 foreach ($workspace in $LogAnalyticsWorkspacesInTenant) {
+    Write-Log "[$($global:CurrentWorkspaceIndex)/$($script:LogAnalyticsWorkspacesInTenant.count)] Querying Log Analytics Workspace: $($Workspace.name)" -Severity Console -Color Black
     @($VMHeartbeatsKQL, $ArcMachineHeartbeatsKQL) | ForEach-Object {
-        if($_) {
+        if($_) {   
             Invoke-DataPerLAW -Workspace $workspace -MachineHeartbeatsKQL $_
         }
     }
+    $global:CurrentWorkspaceIndex++
 }
+
+# ------ Exporting results to CSV ----------
 $queryMonth = ([datetime]$QueryResultList.TimeRangeStart[0]).ToString("MMM")
-$QueryResultList | Sort-Object ResourceType, MachineName | Export-Csv -Path "$($ExportFilePath)${queryMonth}_$($LogSessionId).csv" -Delimiter "," -Encoding UTF8
+if($ResourceType -eq "All") {
+    $ResourceType = "VM_Arc"
+}
+$outputFileName = "$($ExportFilePath)$($queryMonth)_Type_$($ResourceType)_$($LogSessionId).csv"
+$QueryResultList | Sort-Object ResourceType, MachineName | Export-Csv -Path $outputFileName -Delimiter "," -Encoding UTF8
 
 # Count unique VMs and Arc machines in the result list
 $vmCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'virtualMachines' }).Count
 $arcCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'machines' }).Count
 
-
 Write-Log "For month $($queryMonth): Queried data from $($QueryResultList.Count) Machines. VM count: $vmCount. Arc machine count: $arcCount." -Severity Debug
 
-### Identify subscriptions that were in the input list but not found in the results
-$foundSubscriptionIds = $QueryResultList | Select-Object -ExpandProperty SubscriptionId -Unique
-$unresolvedSubscriptions = @()
-foreach ($subId in $subscriptions) {
-    if ($foundSubscriptionIds -notcontains $subId) {
-        $unresolvedSubscriptions += $subId
+### Identify Machines that had no data in LAW
+if (-not $script:machineWithoutLAW) { $script:machineWithoutLAW = @() }
+
+foreach ($entry in $QueryResultList) {
+    $rid = $entry.ResourceId
+
+    $inVm = $false
+    $inArc = $false
+
+    if ($script:VmStatusById -and $script:VmStatusById.ContainsKey($rid)) {
+        $inVm = $true
+    }
+    if ($script:ArcMachinesStatusById -and $script:ArcMachinesStatusById.ContainsKey($rid)) {
+        $inArc = $true
+    }
+
+    if (-not ($inVm -or $inArc)) {
+        $script:machineWithoutLAW += $entry
     }
 }
-### Identify Machines that had no data in LAW
-$noDataInLAW = $QueryResultList | Where-Object { $subscriptions -notcontains $($_.SubscriptionId) }
 
-Write-Log "Subscriptions not found in results: $($unresolvedSubscriptions.Count)" -Severity Debug -Color Magenta
-if ($unresolvedSubscriptions.Count -gt 0) {
-    Write-Log "Unresolved subscriptions: $($unresolvedSubscriptions -join ', ')" -Severity Info
-    $($unresolvedSubscriptions) | Format-List
-}
-if ($noDataInLAW.Count -gt 0) {
-    Write-Log "Machines with no data in LAW: $($noDataInLAW.Count)" -Severity Debug -Color Magenta
-    Write-Log "Unresolved Machines: $($noDataInLAW.MachineName -join ', ')" -Severity Info
-    $noDataInLAW | Format-List -Property SubscriptionId, ResourceGroup, MachineName, ResourceType
+if ($machineWithoutLAW.Count -gt 0) {
+    Write-Log "Machines not founding data in LAW: $($machineWithoutLAW.Count)" -Severity Debug -Color Magenta
+    Write-Log "Unresolved Machines: $($machineWithoutLAW.MachineName -join ', ')" -Severity Info
+    $machineWithoutLAW | Format-List -Property SubscriptionId, ResourceGroup, MachineName, ResourceType
 }
 
 $scriptRunTime = (Get-Date).Subtract([datetime]($scriptStartTime))

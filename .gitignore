@@ -1,5 +1,6 @@
 # add Output to ignore list
-Machine_Availability*
+Machine_Availability*.txt
+Machine_Availability*.csv
 # for matches in any subdirectory, use:
 # **/Machine_Availability*
 
