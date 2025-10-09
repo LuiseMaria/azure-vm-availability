@@ -323,7 +323,7 @@ function Initialize-TenantData {
         # expose resolved subscription list to script scope (used by other functions)
         $script:Subscriptions = $subscriptions
 
-        Write-Log "Resolved $($subscriptions.Count) subscription(s). Querying tenant data (LAWs, suppression rules, VM/Arc lists)..." -Severity Debug Color Green
+        Write-Log "Resolved $($subscriptions.Count) subscription(s). Querying tenant data (LAWs, suppression rules, VM/Arc lists)..." -Severity Debug -Color Green
 
         # Retrieve Log Analytics Workspaces and suppression rules, scoped to subscriptions when provided
         if ($SubscriptionIdList -and $SubscriptionIdList.Count -gt 0) {
