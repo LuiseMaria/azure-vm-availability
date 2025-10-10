@@ -356,7 +356,7 @@ function Initialize-TenantData {
                 Get-ArcMachinesInTenant
             }
         }
-        Write-Log "Initialization for ResourceScope '$ResourceScope': complete: $($LogAnalyticsWorkspacesInTenant.Count) LAWs, $($VmsInTenant.Count) VMs, $($ArcMachinesInTenant.Count) Arc Machines, $($SuppressionRulesInTenant.Count) suppression rules found." -Severity Debug
+        Write-Log "Initialization for ResourceScope '$($ResourceScope.toUpper())': $($LogAnalyticsWorkspacesInTenant.Count) LAWs, $($VmsInTenant.Count) VMs, $($ArcMachinesInTenant.Count) Arc Machines, $($SuppressionRulesInTenant.Count) suppression rules found." -Severity Debug
     }
     catch {
         Write-Log "Initialize-TenantData failed: $_" -Severity Error
@@ -444,7 +444,7 @@ function Invoke-DataPerLAW {
         # run kql (Arc Machine Heartbeats/VM Heartbeats) for each LAW
         $queryResponse = Invoke-AzOperationalInsightsQuery -WorkspaceId $Workspace.WorkspaceId -Query $MachineHeartbeatsKQL -ErrorAction Stop
         if ($queryResponse -and $queryResponse.Results.Count -ge 1) {
-            Write-Log "Results found for workspace: $($Workspace.name)" -Severity Info
+            Write-Log "Results found in workspace: $($Workspace.name)" -Severity Info
             Get-QueryResults -Results $queryResponse.Results -Workspace $Workspace
         }
     }
@@ -625,8 +625,8 @@ function Update-ResultList {
                 FirstHeartbeat                                  = $MachineData.Start.ToString("u")
                 LastHeartbeat                                   = $MachineData.End.ToString("u")
                 "down_rate (%)"                                 = $AvailabilityMetrics.DownRate
-                "Down Rate considering suppression (%)"         = $AvailabilityMetrics.DownRateWithSuppression
                 "availability_rate (%)"                         = $AvailabilityMetrics.AvailabilityRate
+                "Down Rate considering suppression (%)"         = $AvailabilityMetrics.DownRateWithSuppression
                 "Availability Rate considering suppression (%)" = $AvailabilityMetrics.AvailabilityRateWithSuppression
                 "Suppression Duration (h)"                      = [math]::Round($SuppressionDuration / 60, 2)
                 "Down (h)"                                      = $AvailabilityMetrics.TotalHoursDown
@@ -661,32 +661,34 @@ foreach ($workspace in $LogAnalyticsWorkspacesInTenant) {
     $global:CurrentWorkspaceIndex++
 }
 
-# ------ Result Handling & exporting results to CSV ----------
+# ------ Logging Results & exporting results to CSV ----------
 $queryMonth = ([datetime]$QueryResultList.TimeRangeStart[0]).ToString("MMM")
 
 # Count unique VMs and Arc machines in the result list
-$vmCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'virtualMachines' } | Sort-Object -Unique ResourceId).Count
-$arcCount = ($QueryResultList | Where-Object { $_.ResourceType -eq 'machines' } | Sort-Object -Unique ResourceId).Count
-
-Write-Log "For month $($queryMonth): Queried data with $($QueryResultList.Count) entries. Unique VM number: $vmCount. Unique Arc machine number: $arcCount." -Severity Debug
-
-if($vmCount -gt 0 -and $arcCount -gt 0) {
-    $Scope = "VM_Arc"
-} else {
-    $scope = $ResourceScope
-}
-
-$outputFileName = "$($ExportFilePath)$($queryMonth)_Report_$($Scope)_$($LogSessionId).csv"
-$QueryResultList | Sort-Object ResourceType, MachineName | Export-Csv -Path $outputFileName -Delimiter "," -Encoding UTF8
-
+$uniqueVmsInQueryResult = $QueryResultList | Where-Object { $_.ResourceType -eq 'virtualMachines' } | Sort-Object -Unique ResourceId
+$uniqueArcsInQueryResult = $QueryResultList | Where-Object { $_.ResourceType -eq 'machines' } | Sort-Object -Unique ResourceId
 
 ### Identify Machines that had no data in LAW
-$vmNotInLaw = Compare-Object ($QueryResultList | Sort-Object -Unique ResourceId) ($script:VmsInTenant) -Property ResourceId -PassThru | Where-Object { $_.SideIndicator -eq '=>' } | Select-Object -Property Name, ResourceId
-$arcsNotInLaw = Compare-Object ($QueryResultList | Sort-Object -Unique ResourceId) ($script:ArcMachinesInTenant) -Property ResourceId -PassThru | Where-Object { $_.SideIndicator -eq '=>' } | Select-Object -Property Name, ResourceId
-Write-Log "Machines not founding data in LAW: $($vmNotInLaw.Count) VMs, $($arcsNotInLaw.Count) Arc Machines" -Severity Debug -Color Magenta
+if($script:VmsInTenant.Count -gt 0) {
+    $vmNotInLaw = Compare-Object -ReferenceObject ($uniqueVmsInQueryResult) -DifferenceObject ($script:VmsInTenant) -Property ResourceId -PassThru | Where-Object { $_.SideIndicator -eq '=>' } | Select-Object -Property Name, ResourceId
+    $Scope = "VM_"
+}
+if($script:ArcsInTenant.Count -gt 0) {
+    $arcsNotInLaw = Compare-Object -ReferenceObject ($uniqueArcsInQueryResult) -DifferenceObject ($script:ArcMachinesInTenant) -Property ResourceId -PassThru | Where-Object { $_.SideIndicator -eq '=>' } | Select-Object -Property Name, ResourceId
+    $Scope += "Arc_"
+}
+
+$outputFileName = "$($ExportFilePath)$($queryMonth)_Report_$($Scope)$($LogSessionId).csv"
+Write-Log "Exporting results to CSV file: '$outputFileName'" -Severity Debug
+
+$QueryResultList | Sort-Object ResourceType, MachineName -Descending | Export-Csv -Path $outputFileName -Delimiter "," -Encoding UTF8
+
+
+Write-Log "Machines not found in LAW: $($vmNotInLaw.Count) VMs, $($arcsNotInLaw.Count) Arc Machines" -Severity Debug -Color Magenta
 Write-Log "Unresolved VMs: $($vmNotInLaw.Name -join ', ')" -Severity Info
 Write-Log "Unresolved Arc Machines: $($arcsNotInLaw.Name -join ', ')" -Severity Info
 
+Write-Log "SCOPE: '$($ResourceScope.ToUpper())' for month $($queryMonth): Queried data with $($QueryResultList.Count) entries. Unique VM number: $($uniqueVmsInQueryResult.Count). Unique Arc machine number: $($uniqueArcsInQueryResult.Count). ----> In total $($($uniqueVmsInQueryResult.Count) + $($uniqueArcsInQueryResult.Count)) single Machines in Report" -Severity Debug
 
 $scriptRunTime = (Get-Date).Subtract([datetime]($scriptStartTime))
 Write-Log "Script started at: $scriptStartTime. Script ended at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'). Duration: $($scriptRunTime.Hours)h $($scriptRunTime.Minutes)m $($scriptRunTime.Seconds)s" -Color Green -Severity Debug
