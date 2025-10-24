@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Generates a VM and Arc Machine availability report across Azure subscriptions and Log Analytics workspaces.
+    Generates a monthly availability report for Azure Virtual Machines and Azure Arc-enabled servers by querying Log Analytics workspaces across one or more subscriptions.
 
 .DESCRIPTION
     Enumerates Azure subscriptions (or uses a provided list), discovers Log Analytics Workspaces, and runs Kusto queries
@@ -92,10 +92,14 @@ param (
     [Parameter(Mandatory = $true)]
     [ValidateRange(1, 12)]
     [int]$ReportMonth, # Month for which the report is generated (1-12)
-    [string[]]$SubscriptionIdList, # Optional: Specify n Subscription IDs to limit the report to those subscriptions only. If not provided, all accessible subscriptions in Tenant will be included.
+
+    [string[]]$SubscriptionIdList, # Optional: Specify Subscription IDs to limit the report to those subscriptions only. If not provided, all accessible subscriptions in Tenant will be included.
     [ValidateCount(2, 2)]
+
     [int[]]$SubRangeStartEnd, # Provide exactly two integers to define a range (e.g. 20,310)
-    $ExportFilePath = "./Machine_Availability_", # Optional: Directory path to save the output CSV files. Default: current directory.
+
+    [string]$ExportFilePath = "./Machine_Availability_", # Optional: Directory path to save the output CSV files. Default: current directory.
+
     [ValidateSet('All', 'VM', 'Arc')]
     [string]$ResourceScope = 'All'
 )
@@ -173,24 +177,17 @@ function Get-LogAnalyticsWorkspaces {
     )
     $useTenantScope = -not $($SubscriptionIds)
     $azGraphGetLAWQuery = "resources | where type =~ 'microsoft.operationalinsights/workspaces' | project name, subscriptionId, WorkspaceId = tostring(properties.customerId) | sort by tolower(subscriptionId) asc"
-
-    if($useTenantScope) {
-        $workspaces = Search-AzGraph -UseTenantScope -First 1000 -Query $azGraphGetLAWQuery
-    }
-    else {
-        $workspaces = Search-AzGraph -Subscription $SubscriptionIds -First 1000 -Query $azGraphGetLAWQuery
-    }
-    $skip = 1000
-    while($workspaces.Count -ge $skip) {
+    $skipToken = $null
+    do {
         if($useTenantScope) {
-            $workspaces += Search-AzGraph -UseTenantScope -First 1000 -Skip $skip -Query $azGraphGetLAWQuery
+            $workspaces = Search-AzGraph -UseTenantScope -First 1000 -Query $azGraphGetLAWQuery -SkipToken $skipToken
         }
         else {
-            $workspaces += Search-AzGraph -Subscription $SubscriptionIds -First 1000 -Skip $skip -Query $azGraphGetLAWQuery
+            $workspaces = Search-AzGraph -Subscription $SubscriptionIds -First 1000 -Query $azGraphGetLAWQuery -SkipToken $skipToken
         }
-        $skip += 1000
-    }
-    $script:LogAnalyticsWorkspacesInTenant += $workspaces
+        $script:LogAnalyticsWorkspacesInTenant += $workspaces
+        $skipToken = $workspaces.SkipToken
+    } while($skipToken)
 }
 
 function Get-VMsInTenant {
@@ -200,25 +197,20 @@ function Get-VMsInTenant {
     try {
         $azGraphGetVMQuery = "resources | where type =~ 'microsoft.compute/virtualmachines' | extend timeCreated = todatetime(properties.timeCreated) | where timeCreated < (endofmonth(datetime($($UtcTimeRangeStartDate)))) | project name, id, subscriptionId, powerState = properties.extended.instanceView.powerState.displayStatus, timeCreated | sort by tolower(subscriptionId) asc"
         $useTenantScope = -not $($SubscriptionIds)
+        $skipToken = $null
+        do {
 
-        if($useTenantScope) {
-            $vmListResponse = Search-AzGraph -UseTenantScope -First 1000 -Query $azGraphGetVMQuery
-        }
-        else {
-            $vmListResponse = Search-AzGraph -Subscription $SubscriptionIds -First 1000 -Query $azGraphGetVMQuery
-        }
-
-        $skip = 1000
-        while($vmListResponse.Count -ge $skip) {
             if($useTenantScope) {
-                $vmListResponse += Search-AzGraph -UseTenantScope -First 1000 -Skip $skip -Query $azGraphGetVMQuery
+                $vmListResponse = Search-AzGraph -UseTenantScope -First 1000 -Query $azGraphGetVMQuery -SkipToken $skipToken
             }
             else {
-                $vmListResponse += Search-AzGraph -Subscription $SubscriptionIds -First 1000 -Skip $skip -Query $azGraphGetVMQuery
+                $vmListResponse = Search-AzGraph -Subscription $SubscriptionIds -First 1000 -Query $azGraphGetVMQuery -SkipToken $skipToken
             }
-            $skip += 1000
-        }
-        $script:vmsInTenant += $vmListResponse
+            $script:vmsInTenant += $vmListResponse
+            $skipToken = $vmListResponse.SkipToken
+
+        } while($skipToken)        
+
         foreach ($vm in $vmListResponse) {
             $script:VmStatusById[$vm.Id] = $vm.powerState
         }
@@ -235,24 +227,20 @@ function Get-ArcMachinesInTenant {
         $useTenantScope = -not $($SubscriptionIds)
         $azGraphGetArcMachinesQuery = "resources | where type =~ 'microsoft.hybridcompute/machines' | project name, id, subscriptionId,  status = properties.status | sort by tolower(subscriptionId) asc"
 
-        if($useTenantScope) {
-            $arcMachineListResponse = Search-AzGraph -UseTenantScope -First 1000 -Query $azGraphGetArcMachinesQuery
-        }
-        else {
-            $arcMachineListResponse = Search-AzGraph -Subscription $SubscriptionIds -First 1000 -Query $azGraphGetArcMachinesQuery
-        }
+        $skipToken = $null
+        do {
 
-        $skip = 1000
-        while($arcMachineListResponse.Count -ge $skip) {
             if($useTenantScope) {
-                $arcMachineListResponse += Search-AzGraph -UseTenantScope -First 1000 -Skip $skip -Query $azGraphGetArcMachinesQuery
+                $arcMachineListResponse = Search-AzGraph -UseTenantScope -First 1000 -Query $azGraphGetArcMachinesQuery -SkipToken $skipToken
             }
             else {
-                $arcMachineListResponse += Search-AzGraph -Subscription $SubscriptionIds -First 1000 -Skip $skip -Query $azGraphGetArcMachinesQuery
+                $arcMachineListResponse = Search-AzGraph -Subscription $SubscriptionIds -First 1000 -Query $azGraphGetArcMachinesQuery -SkipToken $skipToken
             }
-            $skip += 1000
-        }
-        $script:ArcMachinesInTenant += $arcMachineListResponse
+            $script:ArcMachinesInTenant += $arcMachineListResponse
+            $skipToken = $arcMachineListResponse.SkipToken
+
+        } while($skipToken)  
+
         foreach ($machine in $arcMachineListResponse) {
             $script:ArcMachinesStatusById[$machine.Id] = $machine.status
         }
@@ -269,7 +257,7 @@ function Get-AlertSuppressionRulesInTenant {
     try {
         $azGraphGetSuppressionRulesQuery = "resources | where type =~ 'microsoft.alertsmanagement/actionrules' and not(isempty(properties.schedule)) and ((todatetime(properties.schedule.effectiveFrom) >= startofmonth(datetime($($UtcTimeRangeStartDate))))
             and (todatetime(properties.schedule.effectiveUntil) <= endofmonth(datetime($($UtcTimeRangeStartDate)))))
-        | project effectiveFrom = properties.schedule.effectiveFrom, effectiveUntil = properties.schedule.effectiveUntil, scopes = properties.scopes, name, subscriptionId | sort by tolower(subscriptionId) asc"
+        | project schedule = (properties.schedule), effectiveFrom = properties.schedule.effectiveFrom, effectiveUntil = properties.schedule.effectiveUntil, scopes = properties.scopes, name, subscriptionId | sort by tolower(subscriptionId) asc"
         if($SubscriptionIds.Count -gt 0) {
             $actionRulesResponse = Search-AzGraph -Subscription $SubscriptionIds -First 1000 -Query $azGraphGetSuppressionRulesQuery
         }
@@ -469,14 +457,14 @@ function Get-QueryResults {
         # extract machine data and calculate time values
         $machineData = Merge-MachineWithStatus -ResultRow $resultRow
 
-        # Calculate suppression duration
-        $suppressionDuration = Get-SuppressionDuration -MachineData $machineData
+        # Calculate suppression duration and get schedule details
+        $suppressionInfo = Get-SuppressionDuration -MachineData $machineData
 
         # Calculate availability metrics
-        $availabilityMetrics = Measure-AvailabilityMetrics -ResultRow $resultRow -SuppressionDuration $suppressionDuration
+        $availabilityMetrics = Measure-AvailabilityMetrics -ResultRow $resultRow -SuppressionDuration  $suppressionInfo.Duration
         
         # add new entry or update LAW in the ResultList for matching SubscriptionId, FirstHeartbeat and LastHeartbeat
-        Update-ResultList -MachineData $machineData -AvailabilityMetrics $availabilityMetrics -SuppressionDuration $suppressionDuration -Workspace $Workspace -ResultRow $resultRow
+        Update-ResultList -MachineData $machineData -AvailabilityMetrics $availabilityMetrics -SuppressionInfo $suppressionInfo -Workspace $Workspace -ResultRow $resultRow
     }
 }
 
@@ -521,8 +509,10 @@ function Get-SuppressionDuration {
 
     try {
         $duration = 0
+        $suppressionDetails = @()
         $StartTimeResetedSeconds = (Get-Date ([datetime]$MachineData.Start) -Second 0)
         $EndTimeResetedSeconds = (Get-Date ([datetime]$MachineData.End) -Second 0)
+        
         foreach ($rule in $script:SuppressionRulesInTenant) {  
             $rule | Where-Object { $MachineData.ResourceId -in $_.Scopes } | ForEach-Object {
                 $ruleStart = if ($_.effectiveFrom) { ($_.effectiveFrom).ToUniversalTime() } else { [datetime]::MinValue }
@@ -533,14 +523,24 @@ function Get-SuppressionDuration {
 
                 if ($overlapEnd -gt $overlapStart) {
                     $duration += [math]::Round(($overlapEnd - $overlapStart).TotalMinutes, 0)
+                    
+                    # Add suppression details
+                    $suppressionDetails += $rule.schedule
                 }
             }
         }
-        return $duration
+        
+        return @{
+            Duration        = $duration
+            ScheduleDetails = $suppressionDetails -join '; '
+        }
     }
     catch {
         Write-Log "Could not calculate suppression duration for Machine $($MachineData.Name): $_" -Severity Error
-        return 0
+        return @{
+            Duration        = 0
+            ScheduleDetails = ""
+        }
     }
 }
 
@@ -555,14 +555,15 @@ function Measure-AvailabilityMetrics {
 
     $totalHoursInMonth = if ($ResultRow.total_hours_in_month) { [double]$ResultRow.total_hours_in_month } else { 0.0 }
     $availabilityRate = if ($ResultRow.availability_rate) { [math]::Round([double]$ResultRow.availability_rate, 2) } else { 0.0 }
-    # Convert hours to minutes and ensure minimum values are not zero
-    $totalMinutesInMonth = [math]::Max(1, [math]::Round($totalHoursInMonth * 60, 0))
-    $downMinutes = [math]::Max(0, [math]::Round([double]$ResultRow.total_down_hours * 60, 0))
+    $totalMinutesUp = if ($ResultRow.total_minutes) { [double]$ResultRow.total_minutes } else { 0.0 }
     
+    $totalMinutesDown = [math]::Max(0, [math]::Round([double]$ResultRow.total_down_hours * 60, 0))
+    $actualMachineRuntimeHours  = [math]::Round($totalMinutesUp / 60, 2)
+        
     if ($SuppressionDuration -gt 0) {
         # Take suppression time into availability calculation
-        $adjustedTotalMinutes = [math]::Max(1, $totalMinutesInMonth - $SuppressionDuration)
-        $adjustedDownMinutes = [math]::Max(0, $downMinutes - $SuppressionDuration)
+        $adjustedTotalMinutes = [math]::Max(1, $totalMinutesUp - $SuppressionDuration)
+        $adjustedDownMinutes = [math]::Max(0, $totalMinutesDown - $SuppressionDuration)
         $adjustedAvailableMinutes = [math]::Max(0, $adjustedTotalMinutes - $adjustedDownMinutes)
         
         if ($adjustedTotalMinutes -gt 0) {
@@ -581,7 +582,7 @@ function Measure-AvailabilityMetrics {
         DownRateWithSuppression         = [math]::Round((100 - $availabilityRateWithSuppression), 2)
         TotalHoursDown                  = [math]::Round($ResultRow.total_down_hours, 2)
         TotalHoursAvailable             = [math]::Round($ResultRow.total_available_hours, 2)
-        UnobservedHours                 = [math]::Round($totalHoursInMonth - [math]::Round((([datetime]$ResultRow.LastHeartbeat) - ([datetime]$ResultRow.FirstHeartbeat)).TotalHours, 3), 0)
+        UnobservedHours                 = [math]::Round($totalHoursInMonth - $actualMachineRuntimeHours, 0)
     }
 }
 
@@ -593,59 +594,36 @@ function Update-ResultList {
         [Parameter(Mandatory = $true)]
         [hashtable]$AvailabilityMetrics,
         [Parameter(Mandatory = $true)]
-        [int]$SuppressionDuration,
+        $SuppressionInfo,
         [Parameter(Mandatory = $true)]
         $Workspace,
         [Parameter(Mandatory = $true)]
         $ResultRow
     )
 
-    # Check whether the machine is already in the results list
-    $StartTimeResetedSec = (Get-Date ([datetime]($MachineData.Start)) -Second 0).ToUniversalTime().ToString("u")
-    $EndTimeResetedSec = (Get-Date ([datetime]($MachineData.End)) -Second 0).ToUniversalTime().ToString("u")
-    $existingEntries = $QueryResultList | Where-Object {
-        (($_.ResourceId -eq $MachineData.ResourceId) -and
-        ((Get-Date ([datetime]$_.FirstHeartbeat) -Second 0).ToUniversalTime().ToString("u") -eq $StartTimeResetedSec) -and
-        ((Get-Date ([datetime]$_.LastHeartbeat) -Second 0).ToUniversalTime().ToString("u") -eq $EndTimeResetedSec) -and 
-        ([math]::Round($SuppressionDuration / 60, 2) -eq [double]($_.'Suppression Duration (h)')))
-    }
-
-
-    if ($existingEntries.Count -le 0) {
-        $QueryResultList.Add([PSCustomObject]@{
-                TimeRangeStart                                  = ([datetime]$ResultRow.TimeRangeStart).ToUniversalTime().ToString("u")
-                TimeRangeEnd                                    = ([datetime]$ResultRow.TimeRangeEnd).ToUniversalTime().ToString("u")
-                SubscriptionId                                  = $MachineData.SubscriptionId
-                ResourceId                                      = $MachineData.ResourceId
-                LAW                                             = $Workspace.Name
-                ResourceGroup                                   = $MachineData.ResourceGroup
-                MachineName                                     = $MachineData.Name
-                Status                                          = $MachineData.Status
-                ResourceType                                    = $MachineData.ResourceType
-                FirstHeartbeat                                  = $MachineData.Start.ToString("u")
-                LastHeartbeat                                   = $MachineData.End.ToString("u")
-                "down_rate (%)"                                 = $AvailabilityMetrics.DownRate
-                "availability_rate (%)"                         = $AvailabilityMetrics.AvailabilityRate
-                "Down Rate considering suppression (%)"         = $AvailabilityMetrics.DownRateWithSuppression
-                "Availability Rate considering suppression (%)" = $AvailabilityMetrics.AvailabilityRateWithSuppression
-                "Suppression Duration (h)"                      = [math]::Round($SuppressionDuration / 60, 2)
-                "Down (h)"                                      = $AvailabilityMetrics.TotalHoursDown
-                "Available (h)"                                 = $AvailabilityMetrics.TotalHoursAvailable
-                "Time without observation (h)"                  = $AvailabilityMetrics.UnobservedHours
-                "Total hours in month"                          = $AvailabilityMetrics.TotalHoursInMonth
-            })
-    }
-    else {
-        # Update the existing LAW field entry
-        foreach ($entry in $existingEntries) {
-            try {
-                $QueryResultList[$QueryResultList.IndexOf($entry)].LAW = Merge-Law -existingLAW $entry.LAW -newLAW $Workspace.Name
-            }
-            catch {
-                Write-Log "ERROR while merging LAW values for Machine: $($MachineData.Name) in Subscription $($MachineData.SubscriptionId). $_" -Severity Error
-            }
-        }
-    }
+    $QueryResultList.Add([PSCustomObject]@{
+            TimeRangeStart                               = ([datetime]$ResultRow.TimeRangeStart).ToUniversalTime().ToString("u")
+            TimeRangeEnd                                 = ([datetime]$ResultRow.TimeRangeEnd).ToUniversalTime().ToString("u")
+            SubscriptionId                               = $MachineData.SubscriptionId
+            ResourceId                                   = $MachineData.ResourceId
+            LAW                                          = $Workspace.Name
+            ResourceGroup                                = $MachineData.ResourceGroup
+            MachineName                                  = $MachineData.Name
+            Status                                       = $MachineData.Status
+            ResourceType                                 = $MachineData.ResourceType
+            FirstHeartbeat                               = $MachineData.Start.ToString("u")
+            LastHeartbeat                                = $MachineData.End.ToString("u")
+            "down_rate (%)"                              = $AvailabilityMetrics.DownRate
+            "availability_rate (%)"                      = $AvailabilityMetrics.AvailabilityRate
+            "AvailabilityRateConsideringSuppression (%)" = $AvailabilityMetrics.AvailabilityRateWithSuppression
+            "DownRateConsideringSuppression (%)"         = $AvailabilityMetrics.DownRateWithSuppression
+            "SuppressionDuration (h)"                    = [math]::Round($SuppressionInfo.Duration / 60, 2)
+            "SuppressionScheduleDetails"                 = $SuppressionInfo.ScheduleDetails
+            "Down (h)"                                   = $AvailabilityMetrics.TotalHoursDown
+            "Available (h)"                              = $AvailabilityMetrics.TotalHoursAvailable
+            "Total hours in month"                       = $AvailabilityMetrics.TotalHoursInMonth
+            "Time without observation (h)"               = $AvailabilityMetrics.UnobservedHours
+        })
 }
 
 $global:CurrentWorkspaceIndex = 1
@@ -661,34 +639,77 @@ foreach ($workspace in $LogAnalyticsWorkspacesInTenant) {
     $global:CurrentWorkspaceIndex++
 }
 
+
+$originalCount = $QueryResultList.Count
+
+# ------ Remove duplicates based on ResourceId, FirstHeartbeat, LastHeartbeat and Suppression Duration (h) ---------- 
+
+# Group by the same criteria and merge LAWs for each group
+$UniqueQueryResultList = $QueryResultList |
+Group-Object -Property {
+    $StartTimeResetedSec = (Get-Date ([datetime]($_.FirstHeartbeat)) -Second 0).ToUniversalTime().ToString("u")
+    $EndTimeResetedSec = (Get-Date ([datetime]($_.LastHeartbeat)) -Second 0).ToUniversalTime().ToString("u")
+    $suppressionHours = if ($_.PSObject.Properties.Match('SuppressionDuration (h)')) { [math]::Round([double]$_.('SuppressionDuration (h)'), 2) } else { 0.0 }
+    "$($_.ResourceId)|$StartTimeResetedSec|$EndTimeResetedSec|$suppressionHours"
+} | ForEach-Object {
+    # Take the first entry as the base
+    $baseEntry = $_.Group | Select-Object -First 1
+    
+    # If there are multiple entries in this group, merge their LAWs
+    if ($_.Group.Count -gt 1) {
+        try {
+            # Start with the first LAW and merge others
+            $mergedLAW = $baseEntry.LAW
+            for ($i = 1; $i -lt $_.Group.Count; $i++) {
+                $mergedLAW = Merge-Law -existingLAW $mergedLAW -newLAW $_.Group[$i].LAW
+            }
+            $baseEntry.LAW = $mergedLAW
+        }
+        catch {
+            Write-Log "ERROR while merging LAW values for ResourceId: $($baseEntry.ResourceId). $_" -Severity Error
+        }
+    }
+    return $baseEntry
+}
+
+
+if($UniqueQueryResultList.Count -lt $originalCount) {
+    Write-Log "Duplicates: $originalCount -> $($UniqueQueryResultList.Count) entries remain." -Severity Debug -Color Yellow
+}
+
+
+
 # ------ Logging Results & exporting results to CSV ----------
+
 $queryMonth = ([datetime]$QueryResultList.TimeRangeStart[0]).ToString("MMM")
+$outputFileName = "$($ExportFilePath)$($queryMonth)_Report_$($Scope)$($LogSessionId).csv"
+
 
 # Count unique VMs and Arc machines in the result list
 $uniqueVmsInQueryResult = $QueryResultList | Where-Object { $_.ResourceType -eq 'virtualMachines' } | Sort-Object -Unique ResourceId
 $uniqueArcsInQueryResult = $QueryResultList | Where-Object { $_.ResourceType -eq 'machines' } | Sort-Object -Unique ResourceId
 
-### Identify Machines that had no data in LAW
 if($script:VmsInTenant.Count -gt 0) {
     $vmNotInLaw = Compare-Object -ReferenceObject ($uniqueVmsInQueryResult) -DifferenceObject ($script:VmsInTenant) -Property ResourceId -PassThru | Where-Object { $_.SideIndicator -eq '=>' } | Select-Object -Property Name, ResourceId
     $Scope = "VM_"
 }
-if($script:ArcsInTenant.Count -gt 0) {
+if($script:ArcMachinesInTenant.Count -gt 0) {
     $arcsNotInLaw = Compare-Object -ReferenceObject ($uniqueArcsInQueryResult) -DifferenceObject ($script:ArcMachinesInTenant) -Property ResourceId -PassThru | Where-Object { $_.SideIndicator -eq '=>' } | Select-Object -Property Name, ResourceId
     $Scope += "Arc_"
 }
 
-$outputFileName = "$($ExportFilePath)$($queryMonth)_Report_$($Scope)$($LogSessionId).csv"
-Write-Log "Exporting results to CSV file: '$outputFileName'" -Severity Debug
-
-$QueryResultList | Sort-Object ResourceType, MachineName -Descending | Export-Csv -Path $outputFileName -Delimiter "," -Encoding UTF8
-
-
-Write-Log "Machines not found in LAW: $($vmNotInLaw.Count) VMs, $($arcsNotInLaw.Count) Arc Machines" -Severity Debug -Color Magenta
 Write-Log "Unresolved VMs: $($vmNotInLaw.Name -join ', ')" -Severity Info
 Write-Log "Unresolved Arc Machines: $($arcsNotInLaw.Name -join ', ')" -Severity Info
 
-Write-Log "SCOPE: '$($ResourceScope.ToUpper())' for month $($queryMonth): Queried data with $($QueryResultList.Count) entries. Unique VM number: $($uniqueVmsInQueryResult.Count). Unique Arc machine number: $($uniqueArcsInQueryResult.Count). ----> In total $($($uniqueVmsInQueryResult.Count) + $($uniqueArcsInQueryResult.Count)) single Machines in Report" -Severity Debug
+Write-Log "Machines in LAW: $($VmsInTenant.Count) VMs, $($ArcMachinesInTenant.Count) Arc Machines. NOT in LAW: $($vmNotInLaw.Count) VMs, $($arcsNotInLaw.Count) Arc Machines" -Severity Debug -Color Magenta
+
+Write-Log "SCOPE: '$($ResourceScope.ToUpper())' for month '$($queryMonth)': Queried data with $($UniqueQueryResultList.Count) entries. Unique VM number: $($uniqueVmsInQueryResult.Count). Unique Arc machine number: $($uniqueArcsInQueryResult.Count). ----> In total $($($uniqueVmsInQueryResult.Count) + $($uniqueArcsInQueryResult.Count)) single Machines in Report" -Severity Debug
+
+
+# Replace the List with a new List containing only unique entries
+$UniqueQueryResultList | Sort-Object ResourceType, MachineName -Descending | Export-Csv -Path "$($outputFileName)" -Delimiter "," -Encoding UTF8
+Write-Log "Exporting results to CSV file: '$outputFileName'" -Severity Debug
+
 
 $scriptRunTime = (Get-Date).Subtract([datetime]($scriptStartTime))
 Write-Log "Script started at: $scriptStartTime. Script ended at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'). Duration: $($scriptRunTime.Hours)h $($scriptRunTime.Minutes)m $($scriptRunTime.Seconds)s" -Color Green -Severity Debug
