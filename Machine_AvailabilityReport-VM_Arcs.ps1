@@ -532,7 +532,7 @@ function Get-SuppressionDuration {
         
         return @{
             Duration        = $duration
-            ScheduleDetails = $suppressionDetails -join '; '
+            ScheduleDetails = $suppressionDetails | ForEach-Object { $_  -join '; '}
         }
     }
     catch {
