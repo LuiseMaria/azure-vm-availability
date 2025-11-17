@@ -681,7 +681,7 @@ if($UniqueQueryResultList.Count -lt $originalCount) {
 
 # ------ Logging Results & exporting results to CSV ----------
 
-$queryMonth = ([datetime]$QueryResultList.TimeRangeStart[0]).ToString("MMM")
+$queryMonth = ([datetime]$QueryResultList.TimeRangeStart[0]).ToString("MMM", [System.Globalization.CultureInfo]::InvariantCulture)
 $outputFileName = "$($ExportFilePath)$($queryMonth)_Report_$($Scope)$($LogSessionId).csv"
 
 
