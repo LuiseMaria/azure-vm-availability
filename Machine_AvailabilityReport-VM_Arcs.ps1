@@ -208,12 +208,16 @@ function Get-VMsInTenant {
             }
             $script:vmsInTenant += $vmListResponse
             $skipToken = $vmListResponse.SkipToken
+            
+            foreach ($vm in $vmListResponse) {
+                $script:VmStatusById[$vm.Id] = $vm.powerState
+            }
 
         } while($skipToken)        
 
-        foreach ($vm in $vmListResponse) {
-            $script:VmStatusById[$vm.Id] = $vm.powerState
-        }
+        # foreach ($vm in $vmListResponse) {
+        #     $script:VmStatusById[$vm.Id] = $vm.powerState
+        # }
     }
     catch {
         Write-Log "Error requesting status for VM with Query '$azGraphGetVMQuery': $_" -Severity Error
@@ -239,11 +243,14 @@ function Get-ArcMachinesInTenant {
             $script:ArcMachinesInTenant += $arcMachineListResponse
             $skipToken = $arcMachineListResponse.SkipToken
 
+            foreach ($machine in $arcMachineListResponse) {
+                $script:ArcMachinesStatusById[$machine.Id] = $machine.status
+            }
         } while($skipToken)  
 
-        foreach ($machine in $arcMachineListResponse) {
-            $script:ArcMachinesStatusById[$machine.Id] = $machine.status
-        }
+        # foreach ($machine in $arcMachineListResponse) {
+        #     $script:ArcMachinesStatusById[$machine.Id] = $machine.status
+        # }
     }
     catch {
         Write-Log "Error requesting status for Arc Machines with Query '$azGraphGetArcMachinesQuery': $_" -Severity Error
@@ -482,10 +489,10 @@ function Merge-MachineWithStatus {
 
     # Map status based on resource type
     if ($resourceType -eq "virtualMachines") {
-        $status = $script:VmStatusById[$ResultRow._ResourceId] ?? 'unknown/deleted'
+        $status = $script:VmStatusById[$ResultRow._ResourceId] ?? 'unknown'
     }
     elseif ($resourceType -eq "machines") {
-        $status = $script:ArcMachinesStatusById[$ResultRow._ResourceId] ?? 'unknown/deleted'
+        $status = $script:ArcMachinesStatusById[$ResultRow._ResourceId] ?? 'unknown'
     }
 
     return @{
@@ -524,15 +531,18 @@ function Get-SuppressionDuration {
                 if ($overlapEnd -gt $overlapStart) {
                     $duration += [math]::Round(($overlapEnd - $overlapStart).TotalMinutes, 0)
                     
-                    # Add suppression details
-                    $suppressionDetails += $rule.schedule
+                    # Add suppression details with more information
+                    $scheduleInfo = if ($_.schedule) {
+                        "{$($_.name): from $($_.effectiveFrom) until $($_.effectiveUntil) ($($_.schedule.timeZone))}"
+                    }
+                    $suppressionDetails += $scheduleInfo                
                 }
             }
         }
         
         return @{
             Duration        = $duration
-            ScheduleDetails = $suppressionDetails | ForEach-Object { $_  -join '; '}
+            ScheduleDetails = if ($suppressionDetails.Count -gt 0) { $suppressionDetails -join '; ' }
         }
     }
     catch {
@@ -558,7 +568,7 @@ function Measure-AvailabilityMetrics {
     $totalMinutesUp = if ($ResultRow.total_minutes) { [double]$ResultRow.total_minutes } else { 0.0 }
     
     $totalMinutesDown = [math]::Max(0, [math]::Round([double]$ResultRow.total_down_hours * 60, 0))
-    $actualMachineRuntimeHours  = [math]::Round($totalMinutesUp / 60, 2)
+    $actualMachineRuntimeHours = [math]::Round($totalMinutesUp / 60, 2)
         
     if ($SuppressionDuration -gt 0) {
         # Take suppression time into availability calculation
