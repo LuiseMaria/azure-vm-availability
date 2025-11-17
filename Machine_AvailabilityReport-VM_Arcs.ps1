@@ -209,15 +209,11 @@ function Get-VMsInTenant {
             $script:vmsInTenant += $vmListResponse
             $skipToken = $vmListResponse.SkipToken
             
-            foreach ($vm in $vmListResponse) {
-                $script:VmStatusById[$vm.Id] = $vm.powerState
+            $vmListResponse | ForEach-Object {
+                $script:VmStatusById[$_.Id] = $_.powerState
             }
 
         } while($skipToken)        
-
-        # foreach ($vm in $vmListResponse) {
-        #     $script:VmStatusById[$vm.Id] = $vm.powerState
-        # }
     }
     catch {
         Write-Log "Error requesting status for VM with Query '$azGraphGetVMQuery': $_" -Severity Error
@@ -243,14 +239,10 @@ function Get-ArcMachinesInTenant {
             $script:ArcMachinesInTenant += $arcMachineListResponse
             $skipToken = $arcMachineListResponse.SkipToken
 
-            foreach ($machine in $arcMachineListResponse) {
-                $script:ArcMachinesStatusById[$machine.Id] = $machine.status
+            $arcMachineListResponse | ForEach-Object {
+                $script:ArcMachinesStatusById[$_.Id] = $_.status
             }
         } while($skipToken)  
-
-        # foreach ($machine in $arcMachineListResponse) {
-        #     $script:ArcMachinesStatusById[$machine.Id] = $machine.status
-        # }
     }
     catch {
         Write-Log "Error requesting status for Arc Machines with Query '$azGraphGetArcMachinesQuery': $_" -Severity Error
