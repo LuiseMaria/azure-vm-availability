@@ -525,7 +525,7 @@ function Get-SuppressionDuration {
                     
                     # Add suppression details with more information
                     $scheduleInfo = if ($_.schedule) {
-                        "{$($_.name): from $($_.effectiveFrom) until $($_.effectiveUntil) ($($_.schedule.timeZone))}"
+                        "{$($_.name): $($_.effectiveFrom) - $($_.effectiveUntil) ($($_.schedule.timeZone))}"
                     }
                     $suppressionDetails += $scheduleInfo                
                 }
