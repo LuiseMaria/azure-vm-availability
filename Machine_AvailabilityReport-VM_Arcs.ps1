@@ -381,7 +381,7 @@ FilteredHeartbeat
 | extend availability_rate = round(100.0 * capped_minutes / total_minutes, 2)
 | extend down_rate = round(100.0 - availability_rate, 2)
 | project Resource, ResourceType, RG, _ResourceId, SubscriptionId, timeRangeStart, timeRangeEnd, FirstHeartbeat=start_time, LastHeartbeat=vm_end,
-down_rate, availability_rate, total_available_hours, total_down_hours = round((total_minutes - capped_minutes) / 60.0, 3), total_hours_in_month = round(datetime_diff("minute", timeRangeEnd, timeRangeStart) / 60.0, 1)
+down_rate, availability_rate, total_available_hours, total_minutes, total_down_hours = round((total_minutes - capped_minutes) / 60.0, 3), total_hours_in_month = round(datetime_diff("minute", timeRangeEnd, timeRangeStart) / 60.0, 1)
 "@
 }
 else {
@@ -412,7 +412,7 @@ FilteredHeartbeat
 | extend availability_rate = round(100.0 * capped_minutes / total_minutes, 2)
 | extend down_rate = round(100.0 - availability_rate, 2)
 | project Resource, ResourceType, RG, _ResourceId, SubscriptionId, timeRangeStart, timeRangeEnd, FirstHeartbeat=start_time, LastHeartbeat=machine_end,
-down_rate, availability_rate, total_available_hours, total_down_hours = round((total_minutes - capped_minutes) / 60.0, 3), total_hours_in_month = round(datetime_diff("minute", timeRangeEnd, timeRangeStart) / 60.0, 1)
+down_rate, availability_rate, total_available_hours, total_minutes, total_down_hours = round((total_minutes - capped_minutes) / 60.0, 3), total_hours_in_month = round(datetime_diff("minute", timeRangeEnd, timeRangeStart) / 60.0, 1)
 "@
 }
 else {
